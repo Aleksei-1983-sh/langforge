@@ -1,0 +1,41 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Register - English SaaS</title>
+  <!-- повторное использование стилей логина -->
+  <link rel="stylesheet" href="../login/login.css" />
+</head>
+<body>
+  <div class="login-container">
+    <div class="login-box">
+      <h1 class="logo">English SaaS — Register</h1>
+      <form id="register-form">
+        <div class="input-group">
+          <label for="username">username</label>
+          <input type="text" id="username" required />
+        </div>
+        <div class="input-group">
+          <label for="email">email</label>
+          <input type="email" id="email" required />
+        </div>
+        <div class="input-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" required />
+        </div>
+        <div id="reg-error-msg"></div>
+        <button type="submit" class="login-btn">Register</button>
+      </form>
+
+      <p style="text-align:center; margin-top:12px; font-size:14px; color:#5f6368;">
+        Уже есть аккаунт?
+        <a href="../index.html">Войти</a>
+      </p>
+    </div>
+  </div>
+  <script src="register.js"></script>
+</body>
+</html>
+

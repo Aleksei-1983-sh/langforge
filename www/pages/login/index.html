@@ -1,0 +1,37 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Login - English SaaS</title>
+  <link rel="stylesheet" href="login/login.css" />
+</head>
+<body>
+  <div class="login-container">
+    <div class="login-box">
+      <h1 class="logo">English SaaS</h1>
+      <form id="login-form">
+        <div class="input-group">
+          <label for="username">username</label>
+          <input type="text" id="username" required />
+        </div>
+        <div class="input-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" required />
+        </div>
+        <div id="error-msg"></div>
+        <button type="submit" class="login-btn">Login</button>
+      </form>
+
+      <!-- ссылка на регистрацию -->
+      <p style="text-align:center; margin-top:12px; font-size:14px; color:#5f6368;">
+        Нет аккаунта?
+        <a href="register/register.html">Зарегистрироваться</a>
+      </p>
+    </div>
+  </div>
+  <script src="login/login.js"></script>
+</body>
+</html>
+

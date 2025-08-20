@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    # фиксируем имя compose-проекта, чтобы имена контейнеров были предсказуемыми
+    env:
+      COMPOSE_PROJECT_NAME: langforge
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker containers
+        run: docker compose build
+
+      - name: Start services (compose)
+        run: docker compose up -d
+
+      - name: Show containers (debug)
+        run: docker compose ps
+
+      - name: Wait for Postgres (compose container)
+        run: |
+          echo "Waiting for Postgres (compose)..."
+          # получаем контейнер postgres (compose)
+          CID=""
+          for i in $(seq 1 60); do
+            CID=$(docker compose ps -q postgres)
+            if [ -n "$CID" ]; then
+              if docker exec "$CID" pg_isready -U testuser -d testdb >/dev/null 2>&1; then
+                echo "Postgres ($CID) ready"
+                break
+              fi
+            fi
+            echo -n "."
+            sleep 1
+          done
+          if [ -z "$CID" ]; then
+            echo "Postgres container not found (docker compose ps -q postgres returned empty)"
+            docker compose ps -a
+            exit 2
+          fi
+
+      - name: Ensure backend is running
+        run: |
+          BACK_CID=$(docker compose ps -q backend)
+          if [ -z "$BACK_CID" ]; then
+            echo "backend container not found (compose did not create it)"
+            docker compose ps -a
+            exit 2
+          fi
+          STATE=$(docker inspect -f '{{.State.Running}}' "$BACK_CID")
+          if [ "$STATE" != "true" ]; then
+            echo "backend container exists but is not running. Showing logs:"
+            docker logs "$BACK_CID" || true
+            exit 2
+          fi
+          echo "backend is running: $BACK_CID"
+
+      - name: Run backend tests
+        run: |
+          # запускаем тесты внутри работающего контейнера backend
+          docker compose exec -T backend /app/tests/run_tests.sh
+
+      - name: Stop and cleanup
+        if: always()
+        run: docker compose down -v
