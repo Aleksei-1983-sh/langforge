@@ -1,0 +1,1 @@
+//(We rely on cJSON library; no custom JSON utils beyond including cJSON.)
