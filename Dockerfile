@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     postgresql-client \
     curl \
     ca-certificates \
+    psmisc \
     && rm -rf /var/lib/apt/lists/*
 
 # Собираем в отдельной рабочей директории, чтобы потом не перезаписывать /app томом
@@ -21,12 +22,7 @@ COPY . .
 # Собираем проект (make должен положить результат в ./bin/englearn)
 RUN make
 
-# Устанавливаем бинарник в /usr/local/bin — место вне /app, которое не перезаписывается при монтировании
-RUN install -m 0755 /build/bin/englearn /usr/local/bin/englearn || \
-    (mkdir -p /usr/local/bin && cp /build/bin/englearn /usr/local/bin/englearn && chmod 0755 /usr/local/bin/englearn)
-
-# Убираем временную папку сборки, чтобы образ был чище
-RUN rm -rf /build
+RUN mkdir -p /build/log
 
 # Переменные окружения для тестов/подключения к postgres (docker-compose перезапишет при необходимости)
 ENV PGUSER=testuser
