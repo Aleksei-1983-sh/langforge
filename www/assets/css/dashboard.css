@@ -1,0 +1,9 @@
+/* dashboard.css - стили для дашборда */
+.container { max-width: 1000px; margin: 0 auto; padding: 20px; }
+.site-header { background: #fff; border-bottom: 1px solid #e6e6e6; }
+.site-header .container { display:flex; align-items:center; justify-content:space-between; padding:12px 20px; }
+.logo-img { height: 36px; }
+.nav-right { display:flex; align-items:center; gap:12px; }
+.dashboard-main { padding: 28px 20px; }
+.cards { display:flex; gap:16px; margin-top:18px; }
+.card { background:#fff; padding:18px; border-radius:8px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); flex:1; }

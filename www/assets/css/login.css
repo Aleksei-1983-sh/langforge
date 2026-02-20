@@ -1,0 +1,10 @@
+/* login.css - локальные правки для страницы логина */
+.login-container { display: flex; justify-content: center; align-items: center; height: 100vh; padding: 20px; }
+.login-box {
+  background: #fff;
+  padding: 36px;
+  border-radius: 8px;
+  width: 360px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+}
+.logo { text-align: center; font-size: 22px; margin-bottom: 18px; color: #202124; }

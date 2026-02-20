@@ -1,0 +1,10 @@
+/* register.css - локальные стили для страницы регистрации */
+.login-container { display: flex; justify-content: center; align-items: center; height: 100vh; padding: 20px; }
+.login-box {
+  background: #fff;
+  padding: 34px;
+  border-radius: 8px;
+  width: 420px;
+  box-shadow: 0 4px 18px rgba(0,0,0,0.06);
+}
+.logo { text-align: center; font-size: 20px; margin-bottom: 14px; color: #202124; }

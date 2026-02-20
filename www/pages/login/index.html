@@ -1,37 +1,46 @@
-
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Login - English SaaS</title>
-  <link rel="stylesheet" href="login/login.css" />
+
+  <!-- Базовые стили + компоненты + страничные стили (относительные пути для локального открытия) -->
+  <link rel="stylesheet" href="../../assets/css/base.css" />
+  <link rel="stylesheet" href="../../assets/css/components.css" />
+  <link rel="stylesheet" href="../../assets/css/login.css" />
 </head>
 <body>
-  <div class="login-container">
-    <div class="login-box">
-      <h1 class="logo">English SaaS</h1>
-      <form id="login-form">
+  <main class="login-container" id="main">
+    <section class="login-box" aria-labelledby="login-title">
+      <h1 id="login-title" class="logo">English SaaS</h1>
+
+      <form id="login-form" novalidate>
         <div class="input-group">
-          <label for="username">username</label>
-          <input type="text" id="username" required />
+          <label for="username">Username</label>
+          <input type="text" id="username" name="username" required autocomplete="username" />
         </div>
+
         <div class="input-group">
           <label for="password">Password</label>
-          <input type="password" id="password" required />
+          <input type="password" id="password" name="password" required autocomplete="current-password" />
         </div>
-        <div id="error-msg"></div>
-        <button type="submit" class="login-btn">Login</button>
+
+        <div id="msg" role="status" aria-live="polite"></div>
+
+        <button type="submit" class="btn primary" id="login-btn">Login</button>
       </form>
 
-      <!-- ссылка на регистрацию -->
-      <p style="text-align:center; margin-top:12px; font-size:14px; color:#5f6368;">
+      <p class="small-note">
         Нет аккаунта?
-        <a href="register/register.html">Зарегистрироваться</a>
+        <a href="../../pages/register/index.html">Зарегистрироваться</a>
       </p>
-    </div>
-  </div>
-  <script src="login/login.js"></script>
+    </section>
+  </main>
+
+  <!-- Скрипты: утилиты, API-обёртка, логика страницы (относительные пути) -->
+  <script src="../../assets/js/utils.js"></script>
+  <script src="../../assets/js/api.js"></script>
+  <script src="../../assets/js/login.js"></script>
 </body>
 </html>
-
