@@ -1,9 +1,13 @@
 -- schema.sql
 
+
+-- schema.sql
+
 -- Удаление таблиц в правильном порядке для переинициализации схемы
 DROP TABLE IF EXISTS text_words;
 DROP TABLE IF EXISTS words;
 DROP TABLE IF EXISTS texts;
+DROP TABLE IF EXISTS sessions;
 DROP TABLE IF EXISTS users;
 
 -- Таблица пользователей
@@ -42,4 +46,20 @@ CREATE TABLE text_words (
     word_id INTEGER NOT NULL REFERENCES words(id) ON DELETE CASCADE,
     PRIMARY KEY (text_id, word_id)
 );
+
+-- Таблица для сессий (server-side sessions)
+CREATE TABLE sessions (
+  token       TEXT PRIMARY KEY,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_access TIMESTAMPTZ,
+  expires_at  TIMESTAMPTZ NOT NULL,
+  user_agent  TEXT,
+  ip_addr     TEXT
+);
+
+-- Индексы для удобства поиска/очистки
+CREATE INDEX sessions_user_idx ON sessions(user_id);
+CREATE INDEX sessions_expires_idx ON sessions(expires_at);
+
 

@@ -165,7 +165,6 @@ void start_ollama_server(void) {
         ERR("fork() failed");
     }
 
-end:
     OL_DBG("exit");
     return;
 }
