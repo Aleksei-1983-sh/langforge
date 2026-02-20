@@ -1,0 +1,29 @@
+/* components.css - переиспользуемые компоненты */
+.btn {
+  display: inline-block;
+  padding: 10px 14px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 14px;
+}
+.btn.primary {
+  background-color: #1a73e8;
+  color: #fff;
+}
+.btn:disabled { opacity: 0.6; cursor: default; }
+
+.input-group { margin-bottom: 16px; }
+.input-group label { display: block; margin-bottom: 6px; font-size: 14px; color: #5f6368; }
+.input-group input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #dadce0;
+  border-radius: 4px;
+  font-size: 15px;
+}
+
+#msg { margin-bottom: 10px; font-size: 14px; text-align: center; }
+#msg.error { color: #c53030; }
+#msg.success { color: #2d7a2d; }
