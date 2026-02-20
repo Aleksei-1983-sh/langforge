@@ -26,6 +26,9 @@ services:
       PGHOST: postgres
     volumes:
       - .:/app:cached
+    ports:
+      - "1234:1234"        # <- вот сюда
     # Оставляем контейнер "живым", чтобы workflow мог заходить внутрь и запускать тесты
-    command: tail -f /dev/null
+    command: [ "sh", "-c", "/build/tests/run_tests.sh && tail -f /dev/null" ]
+    # command: tail -f /dev/null
 

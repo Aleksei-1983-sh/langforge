@@ -4,8 +4,8 @@
 
 #include <stdio.h>
 #include <time.h>
-#define DEBUG_LOG_FILE "./src/dbug/debug.log"
-
+//#define DEBUG_LOG_FILE "/build/log/debug.log"
+#define DEBUG_LOG_FILE "/home/di/projects_С/git_progect/langforge/debug.log"
 #define DEBUG_ROUTER
 #define DEBUG_DB
 #define DEBUG_CARD_HANDLER
@@ -13,10 +13,10 @@
 #define DEBUG_TEXT_HANDLER
 #define DEBUG_HTTP
 
-#define ERROR_PRINT_DB(fmt, ...) do { \
+#define ERROR_PRINT(fmt, ...) do { \
     FILE *f = fopen(DEBUG_LOG_FILE, "a"); \
     if (f) { \
-        fprintf(f, "DEBUG: %s:%s[%d]: " fmt "\n", \
+        fprintf(f, "ERROR: %s:%s[%d]: " fmt "\n", \
             __FILE__, __func__, __LINE__, ##__VA_ARGS__); \
         fclose(f); \
     } \

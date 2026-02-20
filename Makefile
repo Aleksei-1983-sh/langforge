@@ -1,6 +1,6 @@
 CC = gcc
-CFLAGS = -O2 -Wall -Wextra -I./src -I./src/libs -I./src/db -I/usr/include -I/usr/include/postgresql
-LDFLAGS = -lpq
+CFLAGS = -O2 -Wall -Wextra -I./src -I./src/libs -I./src/db -I/usr/include -I/usr/include/postgresql -DDEBUG_REQUEST=1
+LDFLAGS = -lpq -lcrypto
 SRCDIR = src
 BINDIR = ./bin
 TARGET = $(BINDIR)/englearn

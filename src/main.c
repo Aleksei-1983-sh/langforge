@@ -25,7 +25,8 @@ static void sigint_handler(int signo)
 /* Удаляем лог-файл отладки */
 void delete_debug_log(void)
 {
-	const char *filepath = "./src/dbug/debug.log";
+	//const char *filepath = "./build/log/debug.log";
+	const char *filepath = "/home/di/projects_С/git_progect/langforge/debug.log";
 	if (unlink(filepath) == 0) {
 		printf("file deleted %s.\n", filepath);
 	} else {
@@ -66,7 +67,8 @@ int main(void)
 			 pgpass ? pgpass : "engpass");
 
 	if (db_connect(conninfo) != 0) return 1;
-	if (init_db(NULL) != 0)
+	const char *path_db = "/home/di/projects_С/git_progect/langforge/src/db/schema.sql";
+	if (init_db(path_db) != 0)
 	{
 		fprintf(stderr, "Failed to initialize database\n");
 		db_disconnect();
@@ -91,7 +93,7 @@ int main(void)
 		return 1;
 	}
 
-	printf("Starting server on port %d\n", LISTEN_PORT);
+	DEBUG_PRINT_MAIN("Starting server on port %d\n", LISTEN_PORT);
 
 	/* Если нужна единая точка входа (catch-all), можно зарегистрировать generic_http_handler
 	 * на "/" после init_router, но тогда роутер внутри должен разбирать req->path вручную.
@@ -118,7 +120,7 @@ int main(void)
 		/* Можно добавить небольшую задержку или таймаут внутри http_server_poll */
 	}
 
-	printf("Shutting down server...\n");
+	DEBUG_PRINT_MAIN("Shutting down server...\n");
 	http_server_stop();
 
 	return 0;

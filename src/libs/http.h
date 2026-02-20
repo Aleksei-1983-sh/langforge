@@ -9,13 +9,24 @@
 extern "C" {
 #endif
 
-// ===================== Отладка =====================
+#define MAX_HEADERS 64
+#define MAX_HEADER_NAME 128
+#define MAX_HEADER_VALUE 1024
+
+	// ===================== Отладка =====================
 // При компиляции с -DDEBUG=1 активируется этот макрос:
 #if defined(DEBUG) && DEBUG == 1
 #define DBG(fmt, ...) \
-  fprintf(stderr, "[DEBUG][%s:%d] " fmt "\n", __func__, __LINE__, ##__VA_ARGS__)
+  fprintf(stderr, "[DEBUG_HTTP][%s:%d] " fmt "\n", __func__, __LINE__, ##__VA_ARGS__)
 #else
 #define DBG(fmt, ...) ((void)0)
+#endif
+
+#if defined(DEBUG_REQUEST) && DEBUG_REQUEST == 1
+#define DBG_REQUEST(fmt, ...) \
+  fprintf(stderr, "[DEBUG_HTTP][%s:%d] " fmt "\n", __func__, __LINE__, ##__VA_ARGS__)
+#else
+#define DBG_REQUEST(fmt, ...) ((void)0)
 #endif
 
 // ===================== HTTP КЛИЕНТ =====================
@@ -30,12 +41,13 @@ int http_post(const char *host, int port, const char *path,
 void http_free_response(char *response);
 
 // ===================== HTTP СЕРВЕР =====================
+
 typedef struct http_request_s {
     char method[8];       /* "GET", "POST", ... */
     char path[256];       /* URI без query, например "/api/cards" */
     char query[256];      /* содержимое после '?', без '?' */
     int header_count;     // число заголовков (max 16)
-    char headers[16][2][256]; // [i][0]=ключ, [i][1]=значение
+    char headers[MAX_HEADERS][2][MAX_HEADER_VALUE]; // [i][0]=ключ, [i][1]=значение
     char *body;           // тело запроса (malloc), длина в body_len
     size_t body_len;
 } http_request_t;
@@ -67,6 +79,14 @@ int http_register_handler(const char *method, const char *path,
 int http_send_response(http_connection_t *conn, int status_code,
                        const char *content_type, const char *body,
                        size_t body_len);
+
+int my_send_response_with_headers(http_connection_t *conn,
+                                  int status,
+                                  const char *mime,
+                                  const char *body,
+                                  size_t len,
+                                  const char **headers,
+                                  size_t headers_count);
 
 // Распарсить raw-буфер длины raw_len в структуру http_request_t.
 // Возвращает 0 при успехе, -1 при ошибки.

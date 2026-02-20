@@ -29,15 +29,15 @@ echo "Running simple DB check..."
 psql -h "$PGHOST" -U "$PGUSER" -d "$PGDATABASE" -c "SELECT 1;" || { echo "DB query failed"; exit 2; }
 
 # (Опционально) Запустить бинарник, если он существует, и проверить доступность HTTP-эндоинта /health
-if [ -x /usr/local/bin/englearn ]; then
+if [ -x /build/bin/englearn ]; then
   echo "Starting binary in background..."
-  /usr/local/bin/englearn &>/tmp/englearn.log &
+  /build/bin/englearn &>/tmp/englearn.log &
   APP_PID=$!
-  sleep 2
+  sleep 1
   # Если у тебя есть health endpoint, можно закомментировать curl строку и раскомментировать
   # curl -fsS http://localhost:8080/health || echo "Health check failed (ok for now)"
-  kill $APP_PID || true
+  #kill $APP_PID || true
 fi
-
+echo "server start!!! Ok"
 echo "Tests finished OK"
 exit 0
