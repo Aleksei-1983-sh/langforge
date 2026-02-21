@@ -566,7 +566,7 @@ void print_word_card(const word_card_t *card) {
     }
 }
 
-void free_word_carads(word_card_t *card)
+void free_word_card(word_card_t *card)
 {
 	if (card == NULL)
 		return;
