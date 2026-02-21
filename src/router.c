@@ -33,5 +33,9 @@ void init_router(void)
 	if (http_register_handler("POST", "/api/me",    handle_me) != 0) {
 		ERROR_PRINT("Failed to register handler for POST /api/me\n");
 	}
+
+	if (http_register_handler("POST", "/api/generate-card", handle_generate_card) != 0) {
+		ERROR_PRINT("Failed to register handler for POST /api/generate-card\n");
+	}
 }
 

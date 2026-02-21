@@ -14,6 +14,6 @@ typedef struct {
 
 word_card_t *generate_word_card(const char *word);
 void print_word_card(const word_card_t *card);
-void free_word_carads(word_card_t *card);
+void free_word_card(word_card_t *card);
 
 #endif // OLLAMA_H

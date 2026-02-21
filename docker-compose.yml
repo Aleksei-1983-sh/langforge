@@ -1,3 +1,5 @@
+version: "3.8"
+
 services:
   postgres:
     image: postgres:15
@@ -6,7 +8,6 @@ services:
       POSTGRES_PASSWORD: testpass
       POSTGRES_DB: testdb
     volumes:
-      # при первом запуске скрипты из /docker-entrypoint-initdb.d/*.sql выполняются автоматически
       - ./src/db/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "testuser", "-d", "testdb"]
@@ -14,21 +15,44 @@ services:
       timeout: 5s
       retries: 10
 
+  ollama:
+    build:
+      context: .
+      dockerfile: docker/ollama/Dockerfile.ollama-mock
+        #    ports:
+        #      - "11434:11434"
+    volumes:
+      - ollama_models:/var/lib/ollama/models
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:11434/ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
   backend:
     build: .
     depends_on:
       postgres:
+        condition: service_healthy
+      ollama:
         condition: service_healthy
     environment:
       PGUSER: testuser
       PGPASSWORD: testpass
       PGDATABASE: testdb
       PGHOST: postgres
+      OLLAMA_HOST: ollama
+      OLLAMA_PORT: 11434
+      OLLAMA_MODEL: "llama3:8b"
     volumes:
       - .:/app:cached
+      - app_bin:/app/bin
     ports:
-      - "1234:1234"        # <- вот сюда
-    # Оставляем контейнер "живым", чтобы workflow мог заходить внутрь и запускать тесты
-    command: [ "sh", "-c", "/build/tests/run_tests.sh && tail -f /dev/null" ]
-    # command: tail -f /dev/null
+      - "1234:1234"
+    # Выполнить тесты, затем остаться в live режиме (tail), чтобы контейнер не падал
+    command: [ "sh", "-c", "/app/tests/run_tests.sh && tail -f /dev/null" ]
+
+volumes:
+  app_bin:
+  ollama_models:
 
