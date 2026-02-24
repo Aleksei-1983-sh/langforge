@@ -13,6 +13,7 @@
 #include <sys/socket.h>
 #include <sys/select.h>
 #include <fcntl.h>
+#include <netdb.h>
 
 #define MAX_HANDLER  16
 #define MAX_CLIENTS  32
@@ -484,66 +485,110 @@ static ssize_t read_all(int sock, char **out_buf) {
     return len;
 }
 
-static int http_request_internal(const char *host, int port,
+static int http_request_internal(const char *host, const char *port,
                                  const char *path, const char *method,
                                  const char *body, const char *headers[],
                                  char **response_out) {
     int sock = -1, rc = -1;
-    struct sockaddr_in serv;
+    struct addrinfo hints, *res = NULL, *rp;
     char *request = NULL;
     size_t req_len = 0;
 
-    DBG("http_request_internal: %s %s", method, path);
+    // Отладка
+    DBG("[HTTP] http_request_internal: %s %s:%s%s\n", method, host, port, path);
 
-    // 1. Создать сокет
-    sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0) { perror("socket"); goto cleanup; }
-    serv.sin_family = AF_INET;
-    serv.sin_port = htons(port);
-    if (inet_pton(AF_INET, host, &serv.sin_addr) <= 0) {
-        perror("inet_pton"); goto cleanup;
-    }
-    if (connect(sock, (struct sockaddr *)&serv, sizeof(serv)) < 0) {
-        perror("connect"); goto cleanup;
+    // 1. Разрешаем имя хоста через getaddrinfo (порт уже строка)
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+
+    int gai_err = getaddrinfo(host, port, &hints, &res);
+    if (gai_err != 0) {
+        ERROR_PRINT("[HTTP] getaddrinfo failed for %s:%s: %s\n",
+                    host, port, gai_strerror(gai_err));
+        goto cleanup;
     }
 
-    // 2. Сформировать HTTP-запрос
+    // 2. Перебираем адреса, пытаемся соединиться
+    for (rp = res; rp != NULL; rp = rp->ai_next) {
+        sock = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+        if (sock < 0) {
+            perror("[HTTP] socket");
+            continue;
+        }
+
+        if (connect(sock, rp->ai_addr, rp->ai_addrlen) == 0) {
+            break;  // успех
+        }
+
+        perror("[HTTP] connect");
+        close(sock);
+        sock = -1;
+    }
+
+    freeaddrinfo(res);
+
+    if (sock < 0) {
+        ERROR_PRINT("[HTTP] could not connect to %s:%s\n", host, port);
+        goto cleanup;
+    }
+
+    DBG("[HTTP] Connected to %s:%s\n", host, port);
+
+    // 3. Сформировать HTTP-запрос
     request = malloc(MAX_BUFFER);
-    if (!request) goto cleanup;
+    if (!request) {
+        ERROR_PRINT("[HTTP] malloc failed\n");
+        goto cleanup;
+    }
+
     size_t offset = 0;
     offset += snprintf(request + offset, MAX_BUFFER - offset,
-                       "%s %s HTTP/1.1\r\nHost: %s:%d\r\n",
+                       "%s %s HTTP/1.1\r\nHost: %s:%s\r\n",
                        method, path, host, port);
+
     if (headers) {
         for (int i = 0; headers[i]; i++) {
             offset += snprintf(request + offset,
                                MAX_BUFFER - offset, "%s\r\n", headers[i]);
         }
     }
+
     if (body) {
         offset += snprintf(request + offset, MAX_BUFFER - offset,
                            "Content-Length: %zu\r\n", strlen(body));
     }
-    offset += snprintf(request + offset, MAX_BUFFER - offset, "Connection: close\r\n\r\n");
+
+    offset += snprintf(request + offset, MAX_BUFFER - offset,
+                       "Connection: close\r\n\r\n");
+
     if (body) {
         offset += snprintf(request + offset, MAX_BUFFER - offset, "%s", body);
     }
+
     req_len = offset;
-    DBG("Сформирован запрос длиной %zu", req_len);
 
-    // 3. Отправить
-    if (send(sock, request, req_len, 0) < 0) { perror("send"); goto cleanup; }
+    DBG("[HTTP] Request (%zu bytes):\n%.*s\n", req_len, (int)req_len, request);
 
-    // 4. Прочитать весь ответ
-    {
-        char *resp = NULL;
-        ssize_t rlen = read_all(sock, &resp);
-        if (rlen < 0) {
-            goto cleanup;
-        }
-        *response_out = resp;
-        rc = 0; // ОК
+    // 4. Отправить
+    ssize_t sent = send(sock, request, req_len, 0);
+    if (sent < 0 || (size_t)sent != req_len) {
+        ERROR_PRINT("[HTTP] send failed: %s\n", strerror(errno));
+        goto cleanup;
     }
+
+    // 5. Прочитать весь ответ
+    char *resp = NULL;
+    ssize_t rlen = read_all(sock, &resp);
+    if (rlen < 0) {
+        ERROR_PRINT("[HTTP] read_all failed\n");
+        goto cleanup;
+    }
+
+    DBG("[HTTP] Response (%zd bytes):\n%.*s\n", rlen, (int)rlen, resp ? resp : "(null)");
+
+    *response_out = resp;
+    rc = 0;  // OK
 
 cleanup:
     if (request) free(request);
@@ -551,12 +596,12 @@ cleanup:
     return rc;
 }
 
-int http_get(const char *host, int port, const char *path,
+int http_get(const char *host, const char *port, const char *path,
              const char *headers[], char **response_out) {
     return http_request_internal(host, port, path, "GET", NULL, headers, response_out);
 }
 
-int http_post(const char *host, int port, const char *path,
+int http_post(const char *host, const char *port, const char *path,
               const char *body, const char *headers[], char **response_out) {
     return http_request_internal(host, port, path, "POST", body, headers, response_out);
 }

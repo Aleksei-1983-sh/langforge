@@ -11,6 +11,9 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     psmisc \
     python3 \
+	strace \
+    vim \
+	net-tools \
     && rm -rf /var/lib/apt/lists/*
 
 # Собираем в отдельной рабочей директории, чтобы потом не перезаписывать /app томом
@@ -28,7 +31,7 @@ RUN mkdir -p /app/bin \
     && install -m 0755 /build/bin/englearn /usr/local/bin/englearn || true
 
 # Лог-папка (при необходимости)
-RUN mkdir -p /build/log
+#RUN mkdir -p /build/log
 
 # Чистим исходники сборки (оставляем артефакт)
 RUN rm -rf /build

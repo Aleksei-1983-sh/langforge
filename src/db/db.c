@@ -1,4 +1,4 @@
-
+// ./src/db/db.c
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,7 +14,22 @@
 static PGconn *db_conn = NULL;
 
 /* Параметры по умолчанию; при необходимости вынеси в конфиг / env */
-static const char *DEFAULT_CONNINFO = "host=localhost dbname=englearn user=enguser password=engpass";
+static char CONNINFO[256];
+
+void db_init_conninfo(void)
+{
+    const char *pguser = getenv("PGUSER");
+    const char *pgpass = getenv("PGPASSWORD");
+    const char *pgdb   = getenv("PGDATABASE");
+    const char *pghost = getenv("PGHOST");
+
+    snprintf(CONNINFO, sizeof(CONNINFO),
+             "host=%s dbname=%s user=%s password=%s",
+             pghost ? pghost : "localhost",
+             pgdb   ? pgdb   : "englearn",
+             pguser ? pguser : "enguser",
+             pgpass ? pgpass : "engpass");
+}
 
 /* Connect to Postgres using connection string (libpq format). Returns 0 on success, -1 on error. */
 int db_connect(const char *conninfo) {
@@ -102,7 +117,7 @@ char *db_create_session(int user_id, int ttl_seconds)
         return NULL;
     }
 
-    if (db_connect(DEFAULT_CONNINFO) != 0) {
+    if (db_connect(CONNINFO) != 0) {
         ERROR_PRINT("db_create_session: db_connect failed");
         return NULL;
     }
@@ -181,7 +196,7 @@ int db_userid_by_session(const char *raw_token)
         return -2;
     }
 
-    if (db_connect(DEFAULT_CONNINFO) != 0) {
+    if (db_connect(CONNINFO) != 0) {
         ERROR_PRINT("db_connect failed");
         return -2;
     }
@@ -239,7 +254,7 @@ int db_delete_session(const char *raw_token)
         return -1;
     }
 
-    if (db_connect(DEFAULT_CONNINFO) != 0) {
+    if (db_connect(CONNINFO) != 0) {
         ERROR_PRINT("db_delete_session: db_connect failed");
         return -1;
     }
@@ -374,7 +389,7 @@ int db_delete_user(int user_id)
         return -1;
     }
 
-    if (db_connect(DEFAULT_CONNINFO) != 0) {
+    if (db_connect(CONNINFO) != 0) {
         ERROR_PRINT("db_connect failed");
         return -1;
     }
@@ -429,7 +444,7 @@ int db_register_user(const char *username, const char *email, const char *passwo
         return -1;
     }
 
-    if (db_connect(DEFAULT_CONNINFO) != 0) {
+    if (db_connect(CONNINFO) != 0) {
         ERROR_PRINT("db_connect failed");
         return -1;
     }
@@ -492,7 +507,7 @@ int db_login_user(const char *username, const char *password_hash)
         return -2;
     }
 
-    if (db_connect(DEFAULT_CONNINFO) != 0) {
+    if (db_connect(CONNINFO) != 0) {
         ERROR_PRINT("db_connect failed");
         return -2;
     }
@@ -630,7 +645,7 @@ int db_get_user_profile(int user_id, char *username_out, size_t uname_sz,
         return -1;
     }
 
-    if (db_connect(DEFAULT_CONNINFO) != 0) {
+    if (db_connect(CONNINFO) != 0) {
         ERROR_PRINT("db_get_user_profile: db_connect failed");
         return -1;
     }

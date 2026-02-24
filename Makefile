@@ -1,5 +1,8 @@
+#./Makefile
 CC = gcc
-CFLAGS = -O2 -Wall -Wextra -I./src -I./src/libs -I./src/db -I/usr/include -I/usr/include/postgresql -DDEBUG_REQUEST=1
+CFLAGS = -O2 -Wall -Wextra -I./src -I./src/libs -I./src/db \
+		 -I./src/dbug -I./src/handlers -I./src/models -I./src/ollama -I./src/utils \
+		 -I/usr/include -I/usr/include/postgresql -DDEBUG_REQUEST=1 -DDEBUG_GENERAL=1
 LDFLAGS = -lpq -lcrypto
 SRCDIR = src
 BINDIR = ./bin

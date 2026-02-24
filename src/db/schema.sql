@@ -3,6 +3,41 @@
 
 -- schema.sql
 
+/*
+ Схема базы данных (ER-диаграмма)
+ ┌──────────┐          ┌─────────┐          ┌─────────┐           
+ |  users   |          |  texts  |          |  words  |
+ |----------|          |---------|          |---------|
+ | id    PK |<---+  +--| id   PK |      +-->| id   PK |
+ | username |    |     | user_id |      |   | user_id |
+ | email    |    |     | title   |      |   | word    |
+ | password |    |     | content |      |   | ...     |
+ | created  |    |     | created |      |   | ...     |
+ └──────────┘    |     └---------┘      |   └---------┘
+                 |                     /     
+                 +-----------------+--+   
+                                   |       
+                             ┌─────────────┐
+                             | text_words  |
+                             |-------------|
+                             | text_id     |
+                             | word_id     |
+                             └─────────────┘
+
+ Дополнительно: таблица sessions (каждый пользователь может иметь много сессий)
+ ┌──────────┐
+ | sessions |
+ |----------|
+ | token PK |
+ | user_id -+----> (FK) users.id
+ | created_at
+ | last_access
+ | expires_at
+ | user_agent
+ | ip_addr
+ └──────────┘
+*/
+
 -- Удаление таблиц в правильном порядке для переинициализации схемы
 DROP TABLE IF EXISTS text_words;
 DROP TABLE IF EXISTS words;

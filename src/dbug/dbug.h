@@ -4,14 +4,26 @@
 
 #include <stdio.h>
 #include <time.h>
-//#define DEBUG_LOG_FILE "/build/log/debug.log"
-#define DEBUG_LOG_FILE "/home/di/projects_С/git_progect/langforge/debug.log"
+#define DEBUG_LOG_FILE "/app/debug.log"
+//#define DEBUG_LOG_FILE "/home/di/projects_С/git_progect/langforge/debug.log"
 #define DEBUG_ROUTER
 #define DEBUG_DB
 #define DEBUG_CARD_HANDLER
 #define DEBUG_MAIN
 #define DEBUG_TEXT_HANDLER
+#define DEBUG_GENERATE_HANDLER
 #define DEBUG_HTTP
+#define DEBUG_OLLAMA
+
+
+#define DEBUG(fmt, ...) do { \
+    FILE *f = fopen(DEBUG_LOG_FILE, "a"); \
+    if (f) { \
+        fprintf(f, "DEBUG: %s:%s[%d]: " fmt "\n", \
+            __FILE__, __func__, __LINE__, ##__VA_ARGS__); \
+        fclose(f); \
+    } \
+} while(0)
 
 #define ERROR_PRINT(fmt, ...) do { \
     FILE *f = fopen(DEBUG_LOG_FILE, "a"); \
@@ -62,6 +74,19 @@
 #define DEBUG_PRINT_CARD_HANDLER(fmt, ...) ((void)0)
 #endif
 
+#ifdef DEBUG_GENERATE_HANDLER
+#define DEBUG_PRINT_GENERATE_HANDLER(fmt, ...) do { \
+    FILE *f = fopen(DEBUG_LOG_FILE, "a"); \
+    if (f) { \
+        fprintf(f, "DEBUG: %s:%s[%d]: " fmt "\n", \
+            __FILE__, __func__, __LINE__, ##__VA_ARGS__); \
+        fclose(f); \
+    } \
+} while(0)
+#else
+#define DEBUG_PRINT_GENERATE_HANDLER(fmt, ...) ((void)0)
+#endif
+
 #ifdef DEBUG_MAIN
 #define DEBUG_PRINT_MAIN(fmt, ...) do { \
     FILE *f = fopen(DEBUG_LOG_FILE, "a"); \
@@ -73,6 +98,19 @@
 } while(0)
 #else
 #define DEBUG_PRINT_MAIN(fmt, ...) ((void)0)
+#endif
+
+#ifdef DEBUG_OLLAMA
+#define DEBUG_PRINT_OLLAMA(fmt, ...) do { \
+    FILE *f = fopen(DEBUG_LOG_FILE, "a"); \
+    if (f) { \
+        fprintf(f, "DEBUG: %s:%s[%d]: " fmt "\n", \
+            __FILE__, __func__, __LINE__, ##__VA_ARGS__); \
+        fclose(f); \
+    } \
+} while(0)
+#else
+#define DEBUG_PRINT_OLLAMA(fmt, ...) ((void)0)
 #endif
 
 //DT

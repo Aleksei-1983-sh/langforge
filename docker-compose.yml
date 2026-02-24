@@ -1,3 +1,4 @@
+#./docker-compose.yml
 version: "3.8"
 
 services:
@@ -19,8 +20,6 @@ services:
     build:
       context: .
       dockerfile: docker/ollama/Dockerfile.ollama-mock
-        #    ports:
-        #      - "11434:11434"
     volumes:
       - ollama_models:/var/lib/ollama/models
     healthcheck:
@@ -49,10 +48,16 @@ services:
       - app_bin:/app/bin
     ports:
       - "1234:1234"
-    # Выполнить тесты, затем остаться в live режиме (tail), чтобы контейнер не падал
-    command: [ "sh", "-c", "/app/tests/run_tests.sh && tail -f /dev/null" ]
+    command: [ "/app/tests/start_server_old.sh" ]
+        #    command: ["sleep", "infinity"]
+  client:
+    image: curlimages/curl:8.5.0
+    depends_on:
+      - backend
+    entrypoint: ["sh"]
+    tty: true
+    stdin_open: true
 
 volumes:
   app_bin:
   ollama_models:
-
