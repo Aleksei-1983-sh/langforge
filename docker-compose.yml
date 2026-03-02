@@ -44,7 +44,7 @@ services:
       OLLAMA_PORT: 11434
       OLLAMA_MODEL: "llama3:8b"
     volumes:
-      - .:/app:cached
+      #      - .:/app:cached
       - app_bin:/app/bin
     ports:
       - "1234:1234"
