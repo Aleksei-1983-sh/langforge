@@ -184,62 +184,92 @@ char *db_create_session(int user_id, int ttl_seconds)
     }
 }
 
-/* Возвращает user_id >=0 при валидной сессии, -1 при не найдено/истекла, -2 при ошибке */
-int db_userid_by_session(const char *raw_token)
+/*
+ * Validate session and optionally perform sliding expiration update.
+ *
+ * Returns:
+ *   >0 : user_id (session valid)
+ *    0 : session not found or expired
+ *   -1 : internal error (db/other)
+ *
+ * Note: ttl_seconds is used to extend expires_at (sliding expiration) when session is valid.
+ */
+int
+db_userid_by_session(const char *raw_token, int ttl_seconds)
 {
-    if (!raw_token) return -1;
+    if (!raw_token || raw_token[0] == '\0') return 0;
+    if (ttl_seconds <= 0) ttl_seconds = 2592000; /* default 30 days */
 
-    /* вычислить sha256(raw_token) */
     char token_hash[65];
     if (sha256_hex(raw_token, token_hash, sizeof(token_hash)) != 0) {
-        ERROR_PRINT("sha256_hex failed");
-        return -2;
+        ERROR_PRINT("db_userid_by_session: sha256_hex failed");
+        return -1;
     }
 
     if (db_connect(CONNINFO) != 0) {
-        ERROR_PRINT("db_connect failed");
-        return -2;
+        ERROR_PRINT("db_userid_by_session: db_connect failed");
+        return -1;
     }
 
-    const char *paramValues[1] = { token_hash };
-    Oid paramTypes[1] = {25};
+    const char *params[1] = { token_hash };
+    Oid types[1] = {25};
 
+    /* Select user_id and expires_at check */
     PGresult *res = PQexecParams(db_conn,
         "SELECT user_id FROM sessions WHERE token = $1 AND expires_at > now();",
-        1, paramTypes, paramValues, NULL, NULL, 0);
+        1, types, params, NULL, NULL, 0);
 
     if (!res) {
-        ERROR_PRINT("PQexecParams returned NULL");
+        ERROR_PRINT("db_userid_by_session: PQexecParams(select) returned NULL");
         db_disconnect();
-        return -2;
+        return -1;
     }
 
-    ExecStatusType st = PQresultStatus(res);
-    if (st != PGRES_TUPLES_OK) {
-        ERROR_PRINT("SELECT failed: %s", PQerrorMessage(db_conn));
-        PQclear(res);
-        db_disconnect();
-        return -2;
-    }
-
-    if (PQntuples(res) == 0) {
-        DEBUG_PRINT_DB("token not found or expired (hash=%s)", token_hash);
+    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+        ERROR_PRINT("db_userid_by_session: SELECT failed: %s", PQerrorMessage(db_conn));
         PQclear(res);
         db_disconnect();
         return -1;
     }
 
-    int uid = atoi(PQgetvalue(res, 0, 0));
+    if (PQntuples(res) == 0) {
+        /* Not found or expired */
+        DEBUG_PRINT_DB("db_userid_by_session: token not found or expired (hash=%s)", token_hash);
+        PQclear(res);
+
+        /* Optionally remove expired session (best-effort) */
+        PGresult *rd = PQexecParams(db_conn, "DELETE FROM sessions WHERE token = $1 AND expires_at <= now();", 1, types, params, NULL, NULL, 0);
+        if (rd) PQclear(rd);
+
+        db_disconnect();
+        return 0;
+    }
+
+    int user_id = atoi(PQgetvalue(res, 0, 0));
     PQclear(res);
 
-    /* Опционально: обновить last_access (commented — включите при желании)
-       PGresult *ru = PQexecParams(db_conn, "UPDATE sessions SET last_access = now() WHERE token = $1;", 1, paramTypes, paramValues, NULL, NULL, 0);
-       if (ru) PQclear(ru);
-    */
+    /* Sliding expiration: update last_access and extends expires_at */
+    char ttl_buf[32];
+    snprintf(ttl_buf, sizeof(ttl_buf), "%d", ttl_seconds);
+    const char *upd_params[2] = { token_hash, ttl_buf };
+    Oid upd_types[2] = {25, 23};
+
+    PGresult *up = PQexecParams(db_conn,
+        "UPDATE sessions SET last_access = now(), expires_at = now() + ($2 || ' seconds')::interval WHERE token = $1;",
+        2, upd_types, upd_params, NULL, NULL, 0);
+
+    if (!up) {
+        DEBUG_PRINT_DB("db_userid_by_session: warning: update last_access failed (NULL)");
+    } else {
+        if (PQresultStatus(up) != PGRES_COMMAND_OK) {
+            DEBUG_PRINT_DB("db_userid_by_session: update last_access returned status %d: %s", PQresultStatus(up), PQerrorMessage(db_conn));
+        }
+        PQclear(up);
+    }
 
     db_disconnect();
-    DEBUG_PRINT_DB("token ok -> user_id=%d", uid);
-    return uid;
+    DEBUG_PRINT_DB("db_userid_by_session: session valid user_id=%d (hash=%s)", user_id, token_hash);
+    return user_id;
 }
 
 /* Удалить сессию по raw token (хешируем перед удалением)

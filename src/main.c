@@ -6,10 +6,12 @@
 #include <stdlib.h>
 #include <signal.h>
 
+#include "ollama/ollama.h"
 #include "dbug/dbug.h"
 #include "router.h"
 #include "db/db.h"
 #include "libs/http.h"
+#include "card_handler.h"
 
 #define LISTEN_PORT 1234
 
@@ -41,6 +43,7 @@ void delete_debug_log(void)
 
 int main(void)
 {
+	delete_debug_log();
 
 	DEBUG_PRINT_MAIN("START SERVER !!!!!!!!!!!!!!!!!");
 	/* Установка обработчика SIGINT, чтобы можно было CTRL+C остановить сервер */
@@ -58,7 +61,7 @@ int main(void)
 	/* Инициализация db conninfo */
 	db_init_conninfo();
 
-	delete_debug_log();
+	resolve_www_dir();
 
 	/* Инициализация маршрутов.
 	 * Внутри init_router() вы должны зарегистрировать все нужные пути:

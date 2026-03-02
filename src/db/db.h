@@ -18,7 +18,7 @@ int db_login_user(const char *username, const char *password_hash);
 int db_register_user(const char *username, const char *email, const char *password_hash);
 
 char *db_create_session(int user_id, int ttl_seconds);
-int db_userid_by_session(const char *raw_token);
+int db_userid_by_session(const char *raw_token, int ttl_seconds);
 
 int db_get_user_profile(int user_id, char *username_out, size_t uname_sz,
                         int *words_learned_out, int *active_lessons_out);
