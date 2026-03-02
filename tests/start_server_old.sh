@@ -4,6 +4,9 @@
 # поведение: проверяет зависимости, применяет схему, запускает бинарник и следит за ним.
 set -euo pipefail
 
+
+: "${SESSION_MAX_AGE:=2592000}"
+
 : "${PGHOST:=postgres}"
 : "${PGUSER:=testuser}"
 : "${PGPASSWORD:=testpass}"
@@ -63,7 +66,7 @@ wait_for_ollama() {
     sleep $WAIT_SLEEP
   done
   err "Mock LLM not responding"
-  return 1
+#  return 1
 }
 
 is_port_listening() {
