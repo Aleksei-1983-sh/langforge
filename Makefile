@@ -32,7 +32,7 @@ clean:
 
 # Запуск тестов: по умолчанию вызывает скрипт в tests/
 test:
-	@if [ -x ./tests/run_tests.sh ]; then ./tests/run_tests.sh; else echo "No tests/run_tests.sh found"; fi
+	@if [ -x ./tests/run_tests.sh ]; then ./tests/run_tests.sh; else echo "No tests/start_server_old.sh found"; fi
 
 
 
