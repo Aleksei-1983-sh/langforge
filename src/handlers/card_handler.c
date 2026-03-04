@@ -11,9 +11,152 @@
 #include <stdarg.h>
 #include <strings.h> /* for strcasecmp */
 
-#define  PATH_MAX 512
-#define  SIZ_PATH 124
+#include <unistd.h>     // readlink, getcwd
+#include <libgen.h>     // dirname
+#include <errno.h>      // errno
+#include <limits.h>     // PATH_MAX
 
+#define PATH_MAX_SAFE PATH_MAX
+#define SIZ_PATH 128
+
+static char g_abs_www[PATH_MAX_SAFE] = "";
+
+/* Вспомогательная: проверить что путь существует и это директория */
+static int is_dir(const char *path)
+{
+    struct stat st;
+
+    if (!path || !*path) {
+        DEBUG_PRINT_CARD_HANDLER("is_dir: empty path");
+        return 0;
+    }
+
+    if (stat(path, &st) != 0) {
+        DEBUG_PRINT_CARD_HANDLER("is_dir: stat('%s') failed: %s",
+                                 path, strerror(errno));
+        return 0;
+    }
+
+    if (!S_ISDIR(st.st_mode)) {
+        DEBUG_PRINT_CARD_HANDLER("is_dir: '%s' exists but is NOT directory",
+                                 path);
+        return 0;
+    }
+
+    return 1;
+}
+
+/*
+ * resolve_www_dir()
+ *
+ * Алгоритм:
+ *   1) realpath("www")
+ *   2) cwd/../www
+ *   3) fallback — использовать относительный "www"
+ *
+ * Должна вызываться один раз при старте сервера.
+ */
+void resolve_www_dir(void)
+{
+    char cwd[PATH_MAX_SAFE];
+    char candidate[PATH_MAX_SAFE];
+    char resolved[PATH_MAX_SAFE];
+
+    DEBUG_PRINT_CARD_HANDLER("resolve_www_dir: === START ===");
+    DEBUG_PRINT_CARD_HANDLER("resolve_www_dir: PATH_MAX=%d",
+                             (int)PATH_MAX_SAFE);
+
+    /* --- Шаг 1: realpath("www") --- */
+    DEBUG_PRINT_CARD_HANDLER("resolve_www_dir: trying realpath(\"www\")");
+
+    errno = 0;
+    if (realpath("www", resolved) != NULL) {
+        DEBUG_PRINT_CARD_HANDLER("resolve_www_dir: realpath success: '%s'",
+                                 resolved);
+
+        if (is_dir(resolved)) {
+            strncpy(g_abs_www, resolved, sizeof(g_abs_www) - 1);
+            g_abs_www[sizeof(g_abs_www) - 1] = '\0';
+
+            DEBUG_PRINT_CARD_HANDLER(
+                "resolve_www_dir: using absolute www: '%s' (len=%zu)",
+                g_abs_www, strlen(g_abs_www));
+            return;
+        } else {
+            DEBUG_PRINT_CARD_HANDLER(
+                "resolve_www_dir: realpath resolved but not directory");
+        }
+    } else {
+        DEBUG_PRINT_CARD_HANDLER(
+            "resolve_www_dir: realpath(\"www\") failed: %s",
+            strerror(errno));
+    }
+
+    /* --- Шаг 2: cwd/../www --- */
+    DEBUG_PRINT_CARD_HANDLER("resolve_www_dir: trying cwd/../www");
+
+    errno = 0;
+    if (!getcwd(cwd, sizeof(cwd))) {
+        DEBUG_PRINT_CARD_HANDLER("resolve_www_dir: getcwd failed: %s",
+                                 strerror(errno));
+    } else {
+        DEBUG_PRINT_CARD_HANDLER("resolve_www_dir: cwd='%s' (len=%zu)",
+                                 cwd, strlen(cwd));
+
+        int written = snprintf(candidate, sizeof(candidate),
+                               "%s/../www", cwd);
+
+        if (written < 0 || (size_t)written >= sizeof(candidate)) {
+            DEBUG_PRINT_CARD_HANDLER(
+                "resolve_www_dir: snprintf overflow while building candidate");
+        } else {
+            DEBUG_PRINT_CARD_HANDLER(
+                "resolve_www_dir: candidate='%s'", candidate);
+
+            errno = 0;
+            if (realpath(candidate, resolved) != NULL) {
+                DEBUG_PRINT_CARD_HANDLER(
+                    "resolve_www_dir: realpath(candidate) success: '%s'",
+                    resolved);
+
+                if (is_dir(resolved)) {
+                    strncpy(g_abs_www, resolved,
+                            sizeof(g_abs_www) - 1);
+                    g_abs_www[sizeof(g_abs_www) - 1] = '\0';
+
+                    DEBUG_PRINT_CARD_HANDLER(
+                        "resolve_www_dir: using cwd-based absolute www: '%s'",
+                        g_abs_www);
+                    return;
+                } else {
+                    DEBUG_PRINT_CARD_HANDLER(
+                        "resolve_www_dir: candidate resolved but not directory");
+                }
+            } else {
+                DEBUG_PRINT_CARD_HANDLER(
+                    "resolve_www_dir: realpath(candidate) failed: %s",
+                    strerror(errno));
+            }
+        }
+    }
+
+    /* --- fallback --- */
+    g_abs_www[0] = '\0';
+
+    DEBUG_PRINT_CARD_HANDLER(
+        "resolve_www_dir: absolute www not found, fallback to relative 'www'");
+    DEBUG_PRINT_CARD_HANDLER("resolve_www_dir: === END ===");
+}
+
+static int get_session_ttl_from_env(void)
+{
+    const char *s = getenv("SESSION_MAX_AGE");
+    if (!s || s[0] == '\0') return 2592000; /* 30 days default */
+    char *endptr = NULL;
+    long v = strtol(s, &endptr, 10);
+    if (endptr == s || v <= 0) return 2592000;
+    return (int)v;
+}
 
 /* --- helper: получить значение cookie по имени (malloc -> нужно free) --- */
 static char *cookie_get_value(const char *cookie_header, const char *name)
@@ -248,7 +391,7 @@ static void log_request_headers(const http_request_t *req)
     size_t bufsize = 0, buflen = 0;
 
     /* Первая строка: метод, путь и query */
-    if (req->query && req->query[0] != '\0') {
+    if (req->query[0] != '\0') {
         _appendf(&buf, &bufsize, &buflen, "HTTP Request: %s %s?%s\n", req->method[0] ? req->method : "-", 
                  req->path[0] ? req->path : "-", req->query);
     } else {
@@ -819,13 +962,10 @@ void handle_me(http_connection_t *conn, http_request_t *req)
         return;
     }
 
-	log_request_headers(req);
-    /* Получаем header Cookie (адаптируйте функцию под вашу структуру request) */
-    const char *cookie_hdr = NULL;
-    /* Предполагается, что у вас есть функция типа http_get_header(req, "Cookie").
-       Если её нет — получите cookie заголовок из структуры req->headers по вашему механизму. */
-    cookie_hdr = http_get_header(req, "Cookie");
+    log_request_headers(req);
 
+    /* Получаем Cookie header */
+    const char *cookie_hdr = http_get_header(req, "Cookie");
     if (!cookie_hdr) {
         DEBUG_PRINT_CARD_HANDLER("no Cookie header");
         cJSON *resp = cJSON_CreateObject();
@@ -849,11 +989,16 @@ void handle_me(http_connection_t *conn, http_request_t *req)
         return;
     }
 
-    DEBUG_PRINT_CARD_HANDLER("found session token (len=%zu)", strlen(session_token));
+    DEBUG_PRINT_CARD_HANDLER("found session token (len=%zu) preview='%.8s'", strlen(session_token), session_token);
 
-    int uid = db_userid_by_session(session_token);
-    if (uid == -2) {
-        /* internal DB error */
+    /* Получаем ttl (сек) из окружения или используем дефолт */
+    int ttl = get_session_ttl_from_env();
+    DEBUG_PRINT_CARD_HANDLER("Using SESSION_MAX_AGE=%d seconds for session validation/refresh", ttl);
+
+    /* Проверяем сессию и выполняем sliding expiration (если валидна) */
+    int uid = db_userid_by_session(session_token, ttl);
+    if (uid == -1) {
+        /* internal DB error (в реализации db_userid_by_session: -1 = error) */
         ERROR_PRINT("db_userid_by_session error");
         free(session_token);
         cJSON *resp = cJSON_CreateObject();
@@ -865,7 +1010,7 @@ void handle_me(http_connection_t *conn, http_request_t *req)
         return;
     }
 
-    if (uid == -1) {
+    if (uid == 0) {
         /* session not found / expired */
         DEBUG_PRINT_CARD_HANDLER("session invalid/expired");
         free(session_token);
@@ -912,195 +1057,208 @@ void handle_me(http_connection_t *conn, http_request_t *req)
     DEBUG_PRINT_CARD_HANDLER("EXIT");
 }
 
+/* --- адаптированный handle_static (использует g_abs_www если задан) --- */
 void handle_static(http_connection_t *conn, http_request_t *req)
 {
-	const char *base_dir = "www";
-	char url_clean[SIZ_PATH];
-	const char *url_path = req->path ? req->path : "/";
+    /* base_dir: абсолютный если определён, иначе относительный "www" */
+    const char *base_dir = (g_abs_www[0] != '\0') ? g_abs_www : "www";
 
-	/* Убираем query/fragments */
-	strip_query_and_fragment(url_path, url_clean, sizeof(url_clean));
+    char url_clean[SIZ_PATH];
+	const char *url_path = (req->path[0] != '\0') ? req->path : "/";
 
-	/* Нормализуем путь: убираем ведущий '/' для удобства (rel_path без ведущего слэша) */
-	char rel_path[SIZ_PATH];
-	if (url_clean[0] == '/') {
-		strncpy(rel_path, url_clean + 1, sizeof(rel_path) - 1);
-		rel_path[sizeof(rel_path) - 1] = '\0';
-	} else {
-		strncpy(rel_path, url_clean, sizeof(rel_path) - 1);
-		rel_path[sizeof(rel_path) - 1] = '\0';
-	}
+    strip_query_and_fragment(url_path, url_clean, sizeof(url_clean));
 
-	DEBUG_PRINT_CARD_HANDLER("requested url='%s' -> rel='%s'", url_path, rel_path);
+    char rel_path[SIZ_PATH];
+    if (url_clean[0] == '/') {
+        strncpy(rel_path, url_clean + 1, sizeof(rel_path) - 1);
+        rel_path[sizeof(rel_path) - 1] = '\0';
+    } else {
+        strncpy(rel_path, url_clean, sizeof(rel_path) - 1);
+        rel_path[sizeof(rel_path) - 1] = '\0';
+    }
 
-	/* Защита от path traversal */
-	if (contains_dot_dot(rel_path)) {
-		const char *msg = "400 Bad Request\n";
-		http_send_response(conn, 400, "text/plain", msg, strlen(msg));
-		return;
-	}
+    /* Диагностика: где сервер смотрит */
+    {
+        char cwd[PATH_MAX] = "<unknown>";
+        if (getcwd(cwd, sizeof(cwd))) {
+            DEBUG_PRINT_CARD_HANDLER("handle_static: cwd='%s'", cwd);
+        }
+        DEBUG_PRINT_CARD_HANDLER("handle_static: using base_dir='%s' requested url='%s' -> rel='%s'",
+                                base_dir, url_path, rel_path);
+    }
 
-	/* Trim trailing spaces (defensive) */
-	size_t rl = strlen(rel_path);
-	while (rl > 0 && (rel_path[rl-1] == ' ' || rel_path[rl-1] == '\t')) {
-		rel_path[--rl] = '\0';
-	}
+    if (contains_dot_dot(rel_path)) {
+        const char *msg = "400 Bad Request\n";
+        http_send_response(conn, 400, "text/plain", msg, strlen(msg));
+        return;
+    }
 
-	/* Special: если запрос корня "/" или пустой -> serve pages/login/index.html */
-	char file_path[PATH_MAX];
-	bool found = false;
-	const char *ext = strrchr(rel_path, '.');
+    size_t rl = strlen(rel_path);
+    while (rl > 0 && (rel_path[rl-1] == ' ' || rel_path[rl-1] == '\t')) {
+        rel_path[--rl] = '\0';
+    }
 
-	if (rel_path[0] == '\0') {
-		snprintf(file_path, sizeof(file_path), "%s/pages/login/index.html", base_dir);
-		if (file_exists(file_path)) found = true;
-	} else {
-		/* REDIRECT: если запрошено "/login" (без слэша) — редиректим на "/login/" */
-		/* Также обрабатываем аналогичные случаи: "/register" -> "/register/" и т.д. */
-		if (rl > 0 && rel_path[rl-1] != '/' ) {
-			/* separate token for comparison: last segment only (we care about exact "login", "register", "dashboard") */
-			if (strcmp(rel_path, "login") == 0 ||
-				strcmp(rel_path, "register") == 0 ||
-				strcmp(rel_path, "dashboard") == 0) {
-				//const char *hdrs[] = { "Location: /login/", "Cache-Control: no-cache, must-revalidate" };
-				/* if rel_path == "register"/"dashboard" adapt Location accordingly */
-				char loc_header[128];
-				if (strcmp(rel_path, "login") == 0) {
-					snprintf(loc_header, sizeof(loc_header), "Location: /login/");
-				} else if (strcmp(rel_path, "register") == 0) {
-					snprintf(loc_header, sizeof(loc_header), "Location: /register/");
-				} else {
-					snprintf(loc_header, sizeof(loc_header), "Location: /dashboard/");
-				}
-				const char *hdrs2[] = { loc_header, "Cache-Control: no-cache, must-revalidate" };
-				const char *body = "<html><body>Redirect</body></html>";
-				my_send_response_with_headers(conn, 301, "text/html", body, strlen(body),
-											  hdrs2, 2);
-				return;
-			}
-		}
+    char candidate[PATH_MAX];
+    char file_path[PATH_MAX];
+    bool found = false;
+    const char *ext = strrchr(rel_path, '.');
 
-		/* Если путь начинается с assets/ или static/ — отдаём напрямую */
-		if (strncmp(rel_path, "assets/", 7) == 0 || strncmp(rel_path, "static/", 7) == 0) {
-			if (join_path(base_dir, rel_path, file_path, sizeof(file_path)) && file_exists(file_path)) {
-				found = true;
-			}
-		}
-	}
+    /* root -> pages/login/index.html */
+    if (rel_path[0] == '\0') {
+        snprintf(candidate, sizeof(candidate), "%s/pages/login/index.html", base_dir);
+        DEBUG_PRINT_CARD_HANDLER("trying candidate: %s", candidate);
+        if (file_exists(candidate)) {
+            strncpy(file_path, candidate, sizeof(file_path)-1);
+            file_path[sizeof(file_path)-1] = '\0';
+            found = true;
+        }
+    } else {
+        if (rl > 0 && rel_path[rl-1] != '/' ) {
+            if (strcmp(rel_path, "login") == 0 ||
+                strcmp(rel_path, "register") == 0 ||
+                strcmp(rel_path, "dashboard") == 0) {
+                char loc_header[128];
+                if (strcmp(rel_path, "login") == 0) {
+                    snprintf(loc_header, sizeof(loc_header), "Location: /login/");
+                } else if (strcmp(rel_path, "register") == 0) {
+                    snprintf(loc_header, sizeof(loc_header), "Location: /register/");
+                } else {
+                    snprintf(loc_header, sizeof(loc_header), "Location: /dashboard/");
+                }
+                const char *hdrs2[] = { loc_header, "Cache-Control: no-cache, must-revalidate" };
+                const char *body = "<html><body>Redirect</body></html>";
+                my_send_response_with_headers(conn, 301, "text/html", body, strlen(body), hdrs2, 2);
+                return;
+            }
+        }
 
-	/* Если не найдено ещё — специальные правила для .css / .js (по basename в assets) */
-	if (!found && ext && strcmp(ext, ".css") == 0) {
-		/* Если путь содержит assets/ — уже покрыто выше; иначе пробуем assets/css/<basename> */
-		if (strncmp(rel_path, "assets/", 7) != 0) {
-			const char *base = strrchr(rel_path, '/');
-			base = base ? base + 1 : rel_path;
-			snprintf(file_path, sizeof(file_path), "%s/assets/css/%s", base_dir, base);
-			if (file_exists(file_path)) found = true;
-		} else {
-			/* already covered, but keep fallback */
-			if (join_path(base_dir, rel_path, file_path, sizeof(file_path)) && file_exists(file_path)) found = true;
-		}
-	} else if (!found && ext && (strcmp(ext, ".js") == 0 || strcmp(ext, ".mjs") == 0)) {
-		if (strncmp(rel_path, "assets/", 7) != 0) {
-			const char *base = strrchr(rel_path, '/');
-			base = base ? base + 1 : rel_path;
-			snprintf(file_path, sizeof(file_path), "%s/assets/js/%s", base_dir, base);
-			if (file_exists(file_path)) found = true;
-		} else {
-			if (join_path(base_dir, rel_path, file_path, sizeof(file_path)) && file_exists(file_path)) found = true;
-		}
-	} else {
-		/* Если последний сегмент не содержит расширение — пробуем pages/<rel>/index.html и pages/<rel>.html */
-		if (!found && !last_segment_has_extension(rel_path)) {
-			char tmp[PATH_MAX];
-			/* уберём возможный конечный '/' для формирования "pages/x/index.html" */
-			char no_slash[SIZ_PATH];
-			strncpy(no_slash, rel_path, sizeof(no_slash)-1);
-			no_slash[sizeof(no_slash)-1] = '\0';
-			size_t n = strlen(no_slash);
-			if (n > 0 && no_slash[n-1] == '/') no_slash[n-1] = '\0';
+        if (strncmp(rel_path, "assets/", 7) == 0 || strncmp(rel_path, "static/", 7) == 0) {
+            if (join_path(base_dir, rel_path, candidate, sizeof(candidate))) {
+                DEBUG_PRINT_CARD_HANDLER("trying candidate: %s", candidate);
+                if (file_exists(candidate)) {
+                    strncpy(file_path, candidate, sizeof(file_path)-1);
+                    file_path[sizeof(file_path)-1] = '\0';
+                    found = true;
+                }
+            }
+        }
+    }
 
-			snprintf(tmp, sizeof(tmp), "pages/%s/index.html", no_slash);
-			if (join_path(base_dir, tmp, file_path, sizeof(file_path)) && file_exists(file_path)) {
-				found = true;
-			} else {
-				snprintf(tmp, sizeof(tmp), "pages/%s.html", no_slash);
-				if (join_path(base_dir, tmp, file_path, sizeof(file_path)) && file_exists(file_path)) {
-					found = true;
-				}
-			}
-		}
+    if (!found && ext && strcmp(ext, ".css") == 0) {
+        if (strncmp(rel_path, "assets/", 7) != 0) {
+            const char *base = strrchr(rel_path, '/');
+            base = base ? base + 1 : rel_path;
+            snprintf(candidate, sizeof(candidate), "%s/assets/css/%s", base_dir, base);
+            DEBUG_PRINT_CARD_HANDLER("trying candidate: %s", candidate);
+            if (file_exists(candidate)) {
+                strncpy(file_path, candidate, sizeof(file_path)-1);
+                file_path[sizeof(file_path)-1] = '\0';
+                found = true;
+            }
+        }
+    } else if (!found && ext && (strcmp(ext, ".js") == 0 || strcmp(ext, ".mjs") == 0)) {
+        if (strncmp(rel_path, "assets/", 7) != 0) {
+            const char *base = strrchr(rel_path, '/');
+            base = base ? base + 1 : rel_path;
+            snprintf(candidate, sizeof(candidate), "%s/assets/js/%s", base_dir, base);
+            DEBUG_PRINT_CARD_HANDLER("trying candidate: %s", candidate);
+            if (file_exists(candidate)) {
+                strncpy(file_path, candidate, sizeof(file_path)-1);
+                file_path[sizeof(file_path)-1] = '\0';
+                found = true;
+            }
+        }
+    }
 
-		/* В конце, если ещё не найдено — попробуем прямо www/<rel_path> */
-		if (!found) {
-			if (join_path(base_dir, rel_path, file_path, sizeof(file_path)) && file_exists(file_path)) {
-				found = true;
-			}
-		}
-	}
+    if (!found && !last_segment_has_extension(rel_path)) {
+        char tmp[PATH_MAX];
+        char no_slash[SIZ_PATH];
+        strncpy(no_slash, rel_path, sizeof(no_slash)-1);
+        no_slash[sizeof(no_slash)-1] = '\0';
+        size_t n = strlen(no_slash);
+        if (n > 0 && no_slash[n-1] == '/') no_slash[n-1] = '\0';
 
-	DEBUG_PRINT_CARD_HANDLER("requested file_path='%s' (found=%d)", file_path, found);
+        snprintf(tmp, sizeof(tmp), "pages/%s/index.html", no_slash);
+        if (join_path(base_dir, tmp, candidate, sizeof(candidate))) {
+            DEBUG_PRINT_CARD_HANDLER("trying candidate: %s", candidate);
+            if (file_exists(candidate)) {
+                strncpy(file_path, candidate, sizeof(file_path)-1);
+                file_path[sizeof(file_path)-1] = '\0';
+                found = true;
+            }
+        }
 
-	if (!found) {
-		const char *notfound = "404 Not Found\n";
-		http_send_response(conn, 404, "text/plain", notfound, strlen(notfound));
-		return;
-	}
+        if (!found) {
+            snprintf(tmp, sizeof(tmp), "pages/%s.html", no_slash);
+            if (join_path(base_dir, tmp, candidate, sizeof(candidate))) {
+                DEBUG_PRINT_CARD_HANDLER("trying candidate: %s", candidate);
+                if (file_exists(candidate)) {
+                    strncpy(file_path, candidate, sizeof(file_path)-1);
+                    file_path[sizeof(file_path)-1] = '\0';
+                    found = true;
+                }
+            }
+        }
+    }
 
-	/* Читаем файл */
-	size_t size = 0;
-	char *body = read_file_to_buffer(file_path, &size);
-	if (!body) {
-		const char *err = "500 Internal Server Error\n";
-		http_send_response(conn, 500, "text/plain", err, strlen(err));
-		return;
-	}
+    if (!found) {
+        if (join_path(base_dir, rel_path, candidate, sizeof(candidate))) {
+            DEBUG_PRINT_CARD_HANDLER("trying candidate: %s", candidate);
+            if (file_exists(candidate)) {
+                strncpy(file_path, candidate, sizeof(file_path)-1);
+                file_path[sizeof(file_path)-1] = '\0';
+                found = true;
+            } else {
+                DEBUG_PRINT_CARD_HANDLER("candidate not found: %s", candidate);
+            }
+        } else {
+            DEBUG_PRINT_CARD_HANDLER("join_path failed for base_dir='%s', rel='%s'", base_dir, rel_path);
+        }
+    }
 
-	const char *mime = get_mime_type(file_path);
-	if (!mime) mime = "application/octet-stream";
+    DEBUG_PRINT_CARD_HANDLER("final file_path='%s' (found=%d)", file_path, found);
 
-	/* Cache policy:
-	   - assets* (css/js/img/fonts) -> public, max-age=3600 (1 hour)
-	   - images/fonts -> longer if хотите (e.g. 86400)
-	   - html/pages -> no-cache, must-revalidate
-	*/
-	const char *cache_hdr = NULL;
-	if (strncmp(file_path, base_dir, strlen(base_dir)) == 0) {
-		const char *sub = file_path + strlen(base_dir) + 1; /* skip "www/" */
-		if (strncmp(sub, "assets/", 7) == 0 || strstr(file_path, "/assets/")) {
-			/* assets */
-			cache_hdr = "Cache-Control: public, max-age=3600";
-		}
-	}
-	/* If file is text/html (page) - prefer no-cache */
-	if (strcmp(mime, "text/html") == 0) {
-		cache_hdr = "Cache-Control: no-cache, must-revalidate";
-	}
-	/* For css/js specifically ensure cache header (if none set above) */
-	if (!cache_hdr && (strcmp(mime, "text/css") == 0 || strcmp(mime, "application/javascript") == 0)) {
-		cache_hdr = "Cache-Control: public, max-age=3600";
-	}
+    if (!found) {
+        const char *notfound = "404 Not Found\n";
+        http_send_response(conn, 404, "text/plain", notfound, strlen(notfound));
+        return;
+    }
 
-	/* Доп. безопасные заголовки */
-	const char *extra1 = "X-Content-Type-Options: nosniff";
-	const char *extra2 = "Referrer-Policy: no-referrer-when-downgrade";
+    size_t size = 0;
+    char *body = read_file_to_buffer(file_path, &size);
+    if (!body) {
+        const char *err = "500 Internal Server Error\n";
+        http_send_response(conn, 500, "text/plain", err, strlen(err));
+        return;
+    }
 
-	/* Собираем массив заголовков (включаем cache_hdr если не NULL) */
-	const char *hdrs[4];
-	size_t hdr_count = 0;
-	if (cache_hdr) hdrs[hdr_count++] = cache_hdr;
-	hdrs[hdr_count++] = extra1;
-	hdrs[hdr_count++] = extra2;
+    const char *mime = get_mime_type(file_path);
+    if (!mime) mime = "application/octet-stream";
 
-	if (hdr_count > 0) {
-		DEBUG_PRINT_CARD_HANDLER("headers present but using fallback http_send_response (headers ignored)");
-	/* Отправляем ответ */
-		my_send_response_with_headers(conn, 200, mime, body, size, hdrs, hdr_count);
-	}
-	else
-	{
-		http_send_response(conn, 200, mime, body, size);
-	}
+    const char *cache_hdr = NULL;
+    if (strncmp(file_path, base_dir, strlen(base_dir)) == 0) {
+        const char *sub = file_path + strlen(base_dir) + 1;
+        if (strncmp(sub, "assets/", 7) == 0 || strstr(file_path, "/assets/")) {
+            cache_hdr = "Cache-Control: public, max-age=3600";
+        }
+    }
+    if (strcmp(mime, "text/html") == 0) cache_hdr = "Cache-Control: no-cache, must-revalidate";
+    if (!cache_hdr && (strcmp(mime, "text/css") == 0 || strcmp(mime, "application/javascript") == 0))
+        cache_hdr = "Cache-Control: public, max-age=3600";
 
-	free(body);
+    const char *extra1 = "X-Content-Type-Options: nosniff";
+    const char *extra2 = "Referrer-Policy: no-referrer-when-downgrade";
+
+    const char *hdrs[4];
+    size_t hdr_count = 0;
+    if (cache_hdr) hdrs[hdr_count++] = cache_hdr;
+    hdrs[hdr_count++] = extra1;
+    hdrs[hdr_count++] = extra2;
+
+    if (hdr_count > 0)
+        my_send_response_with_headers(conn, 200, mime, body, size, hdrs, hdr_count);
+    else
+        http_send_response(conn, 200, mime, body, size);
+
+    free(body);
 }

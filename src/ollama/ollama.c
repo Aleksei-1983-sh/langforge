@@ -8,30 +8,19 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
-#include "http.h"
-#include "cJSON.h"
+#include <netdb.h>      // для getaddrinfo, freeaddrinfo, gai_strerror, struct addrinfo
+#include <sys/socket.h> // для socket, connect (скорее всего уже есть)
+#include <errno.h>      // для strerror (возможно уже есть)
+
+#include "libs/http.h"
+#include "libs/cJSON.h"
+#include "dbug.h"
 
 #include "ollama.h"
 
-/*
- * Макросы для отладки:
- * OL_DBG — печатает отладочные сообщения при DEBUG=1;
- * ERR — печатает ошибки всегда.
- */
-#if defined(DEBUG) && DEBUG == 1
-#define OL_DBG(fmt, ...) \
-    fprintf(stderr, "\033[0;32m[DEBUG] \033[0m [%s:%d] " fmt "\n", __func__, __LINE__, ##__VA_ARGS__)
-#else
-#define OL_DBG(fmt, ...) ((void)0)
-#endif
-
-#define ERR(fmt, ...) \
-    fprintf(stderr, "\033[0;31m[ERROR] \033[0m [%s:%d] " fmt "\n", __func__, __LINE__, ##__VA_ARGS__)
-
-
 #define MODEL_NAME        "llama3:8b"
-#define OLLAMA_HOST       "127.0.0.1"
-#define OLLAMA_PORT       11434
+//#define OLLAMA_HOST       "127.0.0.1"
+//#define OLLAMA_PORT       "11434"
 #define API_PULL_PATH     "/api/pull"
 #define API_GENERATE_PATH "/api/generate"
 
@@ -40,6 +29,16 @@ char *build_prompt_for_word(const char *word);
 char *build_json_payload(const char *escaped_prompt);
 void ensure_ollama_running(void);
 void handle_response(const char *response);
+
+static char *OLLAMA_HOST;
+static char *OLLAMA_PORT;
+
+void ollama_init(void) {
+    OLLAMA_HOST = getenv("OLLAMA_HOST");
+    OLLAMA_PORT = getenv("OLLAMA_PORT");
+    if (!OLLAMA_HOST) OLLAMA_HOST = "127.0.0.1";
+    if (!OLLAMA_PORT) OLLAMA_PORT = "11434";
+}
 
 /*
  * Экранирует кавычки, бэкслэши и управляющие символы, чтобы вставлять в JSON.
@@ -53,9 +52,9 @@ char *escape_json(const char *input) {
     const char *src;
     char *dst;
 
-    OL_DBG("enter: input=%p \"%s\"", input, input ? input : "");
+    DEBUG_PRINT_OLLAMA("enter: input=%p \"%s\"", input, input ? input : "");
     if (!input) {
-        ERR("input is NULL");
+        ERROR_PRINT("input is NULL");
         goto end;
     }
 
@@ -63,7 +62,7 @@ char *escape_json(const char *input) {
     /* worst-case: каждый символ превращается в 2 символа */
     buf = malloc(len * 2 + 1);
     if (!buf) {
-        ERR("malloc failed for escape buffer");
+        ERROR_PRINT("malloc failed for escape buffer");
         goto end;
     }
 
@@ -101,7 +100,7 @@ char *escape_json(const char *input) {
 
 end:
     if (buf) free(buf);
-    OL_DBG("exit: escaped=%p \"%s\"", escaped, escaped ? escaped : "");
+    DEBUG_PRINT_OLLAMA("exit: escaped=%p \"%s\"", escaped, escaped ? escaped : "");
     return escaped;
 }
 
@@ -113,34 +112,50 @@ end:
 int is_ollama_running(void) {
     int ret = 0;
     int sockfd = -1;
-    struct sockaddr_in serv_addr;
+    struct addrinfo hints, *res, *rp;
 
-    OL_DBG("enter");
-    sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0) {
-        ERR("socket() failed");
+    DEBUG_PRINT_OLLAMA("enter");
+
+    const char *host = OLLAMA_HOST ? OLLAMA_HOST : "127.0.0.1";
+    const char *port_str = OLLAMA_PORT ? OLLAMA_PORT : "11434";
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+
+    int gai_result = getaddrinfo(host, port_str, &hints, &res);
+    if (gai_result != 0) {
+        ERROR_PRINT("getaddrinfo failed for %s:%s — %s", host, port_str, gai_strerror(gai_result));
         goto end;
     }
 
-    memset(&serv_addr, 0, sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(OLLAMA_PORT);
-    serv_addr.sin_addr.s_addr = inet_addr(OLLAMA_HOST);
+    for (rp = res; rp != NULL; rp = rp->ai_next) {
+        sockfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+        if (sockfd < 0)
+            continue;
 
-    if (connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) == 0) {
-        OL_DBG("connect succeeded");
-        ret = 1;
-    } else {
-        OL_DBG("connect failed or not listening");
-        ret = 0;
+        if (connect(sockfd, rp->ai_addr, rp->ai_addrlen) == 0) {
+            break; // успех
+        }
+
+        close(sockfd);
+        sockfd = -1;
     }
 
+    if (sockfd >= 0) {
+        DEBUG_PRINT_OLLAMA("connected to %s:%s", host, port_str);
+        ret = 1;
+        close(sockfd);
+    } else {
+        DEBUG_PRINT_OLLAMA("could not connect to %s:%s (%s)", host, port_str, strerror(errno));
+    }
+
+    freeaddrinfo(res);
+
 end:
-    if (sockfd >= 0) close(sockfd);
-    OL_DBG("exit: ret=%d", ret);
+    DEBUG_PRINT_OLLAMA("exit: ret=%d", ret);
     return ret;
 }
-
 /*
  * Запускает «ollama serve» в фоне.
  * Void функция. Один выход через label end.
@@ -148,24 +163,24 @@ end:
 void start_ollama_server(void) {
     pid_t pid;
 
-    OL_DBG("enter");
+    DEBUG_PRINT_OLLAMA("enter");
     pid = fork();
     if (pid == 0) {
         /* дочерний процесс */
-        OL_DBG("in child: about to execlp");
+        DEBUG_PRINT_OLLAMA("in child: about to execlp");
         execlp("ollama", "ollama", "serve", NULL);
-        ERR("execlp failed to run `ollama serve`");
+        ERROR_PRINT("execlp failed to run `ollama serve`");
         _exit(1); /* в child сразу выходим */
     } else if (pid > 0) {
         /* родитель */
-        OL_DBG("in parent: forked child pid=%d", pid);
+        DEBUG_PRINT_OLLAMA("in parent: forked child pid=%d", pid);
         printf("Запускается `ollama serve` в фоне...\n");
         sleep(3); /* даём время подняться */
     } else {
-        ERR("fork() failed");
+        ERROR_PRINT("fork() failed");
     }
 
-    OL_DBG("exit");
+    DEBUG_PRINT_OLLAMA("exit");
     return;
 }
 
@@ -178,21 +193,21 @@ static char *find_http_body(const char *response) {
     char *body = NULL;
     char *p = NULL;
 
-    OL_DBG("enter: response=%p", response);
+    DEBUG_PRINT_OLLAMA("enter: response=%p", response);
     if (!response) {
-        ERR("response is NULL");
+        ERROR_PRINT("response is NULL");
         goto end;
     }
     p = strstr(response, "\r\n\r\n");
     if (p) {
         body = p + 4;
-        OL_DBG("found header/body separator at %p", (void*)p);
+        DEBUG_PRINT_OLLAMA("found header/body separator at %p", (void*)p);
     } else {
-        OL_DBG("no header/body separator found");
+        DEBUG_PRINT_OLLAMA("no header/body separator found");
     }
 
 end:
-    OL_DBG("exit: body=%p", body);
+    DEBUG_PRINT_OLLAMA("exit: body=%p", body);
     return body;
 }
 
@@ -211,9 +226,9 @@ char *decode_chunked_body(const char *body) {
     char *endptr = NULL;
     size_t total = 0;
 
-    OL_DBG("enter: body=%p", body);
+    DEBUG_PRINT_OLLAMA("enter: body=%p", body);
     if (!body) {
-        ERR("body is NULL");
+        ERROR_PRINT("body is NULL");
         goto end;
     }
 
@@ -222,24 +237,24 @@ char *decode_chunked_body(const char *body) {
     while (1) {
         len = strtoul(p, &endptr, 16);
         if (endptr == p) {
-            OL_DBG("no more chunk-size found, break");
+            DEBUG_PRINT_OLLAMA("no more chunk-size found, break");
             break;
         }
-        OL_DBG("parsed chunk size: %lu", len);
+        DEBUG_PRINT_OLLAMA("parsed chunk size: %lu", len);
 
         p = endptr;
         if (p[0] != '\r' || p[1] != '\n') {
-            ERR("expected CRLF after chunk size, got: %.2s", p);
+            ERROR_PRINT("expected CRLF after chunk size, got: %.2s", p);
             goto end;
         }
         p += 2;
 
         total += len;
-        OL_DBG("total so far: %zu", total);
+        DEBUG_PRINT_OLLAMA("total so far: %zu", total);
 
         p += len;
         if (p[0] != '\r' || p[1] != '\n') {
-            ERR("expected CRLF after chunk data, got: %.2s", p);
+            ERROR_PRINT("expected CRLF after chunk data, got: %.2s", p);
             goto end;
         }
         p += 2;
@@ -249,7 +264,7 @@ char *decode_chunked_body(const char *body) {
 
     out = malloc(total + 1);
     if (!out) {
-        ERR("malloc failed, size = %zu", total + 1);
+        ERROR_PRINT("malloc failed, size = %zu", total + 1);
         goto end;
     }
 
@@ -259,31 +274,31 @@ char *decode_chunked_body(const char *body) {
     while (1) {
         len = strtoul(p, &endptr, 16);
         if (endptr == p) {
-            OL_DBG("no more chunk-size in second pass, break");
+            DEBUG_PRINT_OLLAMA("no more chunk-size in second pass, break");
             break;
         }
-        OL_DBG("copy chunk size: %lu", len);
+        DEBUG_PRINT_OLLAMA("copy chunk size: %lu", len);
 
         p = endptr;
         if (p[0] != '\r' || p[1] != '\n') {
-            ERR("expected CRLF after chunk size, got: %.2s", p);
+            ERROR_PRINT("expected CRLF after chunk size, got: %.2s", p);
             goto end;
         }
         p += 2;
 
-        OL_DBG("copying chunk: %.20s", p); // Показать первые 20 символов чанка
+        DEBUG_PRINT_OLLAMA("copying chunk: %.20s", p); // Показать первые 20 символов чанка
         memcpy(dst, p, len);
         dst += len;
         p += len;
 
         if (p[0] != '\r' || p[1] != '\n') {
-            ERR("expected CRLF after chunk data, got: %.2s", p);
+            ERROR_PRINT("expected CRLF after chunk data, got: %.2s", p);
             goto end;
         }
         p += 2;
 
         if (len == 0) {
-            OL_DBG("final 0-length chunk reached");
+            DEBUG_PRINT_OLLAMA("final 0-length chunk reached");
             break;
         }
     }
@@ -294,7 +309,7 @@ char *decode_chunked_body(const char *body) {
 
 end:
     if (out) free(out);
-    OL_DBG("exit: result=%p", result);
+    DEBUG_PRINT_OLLAMA("exit: result=%p", result);
     return result;
 }
 
@@ -314,28 +329,28 @@ void pull_model_if_needed(void) {
     char *body = NULL;
     char *decoded = NULL;
 
-    OL_DBG("enter");
+    DEBUG_PRINT_OLLAMA("enter");
     snprintf(post_data, sizeof(post_data), "{\"name\":\"%s\"}", MODEL_NAME);
-    OL_DBG("post_data: %s", post_data);
+    DEBUG_PRINT_OLLAMA("post_data: %s", post_data);
 
     status = http_post(OLLAMA_HOST, OLLAMA_PORT, API_PULL_PATH, post_data, headers, &response);
     if (status < 0) {
-        ERR("http_post for %s failed", API_PULL_PATH);
+        ERROR_PRINT("http_post for %s failed", API_PULL_PATH);
         goto end;
     }
     printf("HTTP status code: %d\n", status);
     if (!response) {
-        ERR("empty response from http_post");
+        ERROR_PRINT("empty response from http_post");
         goto end;
     }
-    OL_DBG("raw HTTP response:\n%s", response);
+    DEBUG_PRINT_OLLAMA("raw HTTP response:\n%s", response);
 
     body = find_http_body(response);
     if (!body) {
-        OL_DBG("treating entire response as body");
+        DEBUG_PRINT_OLLAMA("treating entire response as body");
         body = response;
     }
-    OL_DBG("body starts at %p: \"%.30s...\"", body, body);
+    DEBUG_PRINT_OLLAMA("body starts at %p: \"%.30s...\"", body, body);
 
     decoded = decode_chunked_body(body);
     if (decoded) {
@@ -347,7 +362,7 @@ void pull_model_if_needed(void) {
 end:
     if (decoded) free(decoded);
     if (response) http_free_response(response);
-    OL_DBG("exit");
+    DEBUG_PRINT_OLLAMA("exit");
     return;
 }
 
@@ -361,46 +376,46 @@ void print_card_from_response(const char *response_json) {
     cJSON *card_json = NULL;
     char *pretty = NULL;
 
-    OL_DBG("enter: response_json=%p \"%.30s...\"", response_json, response_json ? response_json : "");
+    DEBUG_PRINT_OLLAMA("enter: response_json=%p \"%.30s...\"", response_json, response_json ? response_json : "");
     if (!response_json) {
-        ERR("response_json is NULL");
+        ERROR_PRINT("response_json is NULL");
         goto end;
     }
 
     root = cJSON_Parse(response_json);
     if (!root) {
-        ERR("cJSON_Parse failed");
+        ERROR_PRINT("cJSON_Parse failed");
         goto end;
     }
-    OL_DBG("parsed root JSON");
+    DEBUG_PRINT_OLLAMA("parsed root JSON");
 
     response_field = cJSON_GetObjectItem(root, "response");
     if (!cJSON_IsString(response_field)) {
-        ERR("no 'response' field or not a string");
+        ERROR_PRINT("no 'response' field or not a string");
         goto end;
     }
-    OL_DBG("found 'response' field: \"%s\"", response_field->valuestring);
+    DEBUG_PRINT_OLLAMA("found 'response' field: \"%s\"", response_field->valuestring);
 
     card_json = cJSON_Parse(response_field->valuestring);
     if (!card_json) {
-        OL_DBG("nested JSON parse failed, printing raw string");
+        DEBUG_PRINT_OLLAMA("nested JSON parse failed, printing raw string");
         printf("%s\n", response_field->valuestring);
         goto end;
     }
-    OL_DBG("parsed nested JSON");
+    DEBUG_PRINT_OLLAMA("parsed nested JSON");
 
     pretty = cJSON_Print(card_json);
     if (pretty) {
         printf("%s\n", pretty);
         free(pretty);
     } else {
-        ERR("cJSON_Print returned NULL");
+        ERROR_PRINT("cJSON_Print returned NULL");
     }
 
 end:
     if (card_json) cJSON_Delete(card_json);
     if (root) cJSON_Delete(root);
-    OL_DBG("exit");
+    DEBUG_PRINT_OLLAMA("exit");
     return;
 }
 
@@ -436,7 +451,7 @@ char *build_json_payload(const char *escaped_prompt) {
 
 void ensure_ollama_running(void) {
     if (!is_ollama_running()) {
-        OL_DBG("Ollama not running, starting server");
+        DEBUG_PRINT_OLLAMA("Ollama not running, starting server");
         start_ollama_server();
     } else {
         printf("Ollama уже запущен.\n");
@@ -452,18 +467,18 @@ void handle_response(const char *response) {
         body = response;
     }
 
-    OL_DBG("body starts at %p: \"%.100s...\"", body, body);
+    DEBUG_PRINT_OLLAMA("body starts at %p: \"%.100s...\"", body, body);
 
     if (strstr(response, "Transfer-Encoding: chunked")) {
         decoded = decode_chunked_body(body);
     }
 
     if (decoded) {
-        OL_DBG("decoded chunked body, first 30 chars: \"%.100s...\"", decoded);
+        DEBUG_PRINT_OLLAMA("decoded chunked body, first 30 chars: \"%.100s...\"", decoded);
         print_card_from_response(decoded);
         free(decoded);
     } else {
-        OL_DBG("could not decode chunked, using raw body");
+        DEBUG_PRINT_OLLAMA("could not decode chunked, using raw body");
         print_card_from_response(body);
     }
 }
@@ -519,8 +534,13 @@ word_card_t *generate_word_card(const char *word) {
     json_data = build_json_payload(escaped_prompt);
     if (!json_data) goto cleanup;
 
-    if (http_post(OLLAMA_HOST, OLLAMA_PORT, API_GENERATE_PATH, json_data, headers, &response) < 0 || !response)
-        goto cleanup;
+
+	DEBUG_PRINT_OLLAMA("OLLAMA_HOST=%s, OLLAMA_PORT=%s", OLLAMA_HOST, OLLAMA_PORT);
+
+	if (http_post(OLLAMA_HOST, OLLAMA_PORT, API_GENERATE_PATH, json_data, headers, &response) < 0 || !response) {
+		ERROR_PRINT("http_post failed or returned NULL response");
+		goto cleanup;
+	}
 
     body = find_http_body(response);
     if (!body) body = response;
@@ -579,31 +599,3 @@ void free_word_card(word_card_t *card)
 	free(card);
 	card = NULL;
 }
-
-/*
- * main: один выход через label end.
- */
-/*
-int main(void) {
-    //const char *words[] = { "run", "eat", "speak", "write", "read", "sleep", "jump", "play" };
-    const char *words[] = { "play" };
-    size_t count = sizeof(words) / sizeof(words[0]);
-    word_card_t *cards[count];
-
-    for (size_t i = 0; i < count; ++i) {
-        cards[i] = generate_word_card(words[i]);
-        if (cards[i]) {
-            print_word_card(cards[i]);
-            printf("\n");
-        } else {
-            printf("Ошибка при генерации для слова: %s\n", words[i]);
-        }
-    }
-
-    // очистка
-    for (size_t i = 0; i < count; ++i) {
-		free_word_carads(cards[i]);
-    }
-
-    return 0;
-}*/

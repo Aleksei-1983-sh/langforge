@@ -10,5 +10,8 @@ void handle_me(http_connection_t *conn, http_request_t *req);
 void handle_static(http_connection_t *conn, http_request_t *req);
 void handle_login(http_connection_t *conn, http_request_t *req);
 void handle_register(http_connection_t *conn, http_request_t *req);
+
+
+void resolve_www_dir(void);
 #endif
 

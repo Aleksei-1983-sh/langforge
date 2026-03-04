@@ -1,5 +1,19 @@
-# Dockerfile
-FROM ubuntu:24.04
+# ==============================
+# FRONTEND BUILD STAGE
+# ==============================
+FROM node:20-alpine AS frontend-build
+
+WORKDIR /frontend
+COPY www/package*.json ./
+RUN npm ci
+
+COPY www ./
+RUN npm run build
+
+# ==============================
+# BACKEND BUILD STAGE
+# ==============================
+FROM ubuntu:24.04 AS backend-build
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -11,34 +25,46 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     psmisc \
     python3 \
+    strace \
+    vim \
+    net-tools \
+    tree\
     && rm -rf /var/lib/apt/lists/*
 
-# Собираем в отдельной рабочей директории, чтобы потом не перезаписывать /app томом
 WORKDIR /build
-
-# Копируем весь проект в /build (в образе)
 COPY . .
-
-# Собираем проект (make должен положить результат в ./bin/englearn)
 RUN make
 
-# Создаём /app/bin и ставим туда бинарник из результата сборки
-RUN mkdir -p /app/bin \
-    && install -m 0755 /build/bin/englearn /app/bin/englearn || true \
-    && install -m 0755 /build/bin/englearn /usr/local/bin/englearn || true
+# ==============================
+# FINAL RUNTIME IMAGE
+# ==============================
+FROM ubuntu:24.04
 
-# Лог-папка (при необходимости)
-RUN mkdir -p /build/log
+ENV DEBIAN_FRONTEND=noninteractive
 
-# Чистим исходники сборки (оставляем артефакт)
-RUN rm -rf /build
+RUN apt-get update && apt-get install -y \
+    libpq5 \
+    postgresql-client \
+    ca-certificates \
+    tree\
+    && rm -rf /var/lib/apt/lists/*
 
-# Переменные окружения по умолчанию (docker-compose может их перезаписать)
+WORKDIR /app
+
+# Копируем backend
+COPY --from=backend-build /build/bin/englearn /app/bin/englearn
+# Копируем тесты/скрипты из backend-build в финальный образ
+COPY --from=backend-build /build/tests /app/tests
+
+# Убедимся, что скрипт исполняемый
+RUN chmod +x /app/tests/start_server_old.sh
+
+# Копируем уже собранный фронтенд
+COPY --from=frontend-build /frontend/dist /app/www/
+
 ENV PGUSER=testuser
 ENV PGPASSWORD=testpass
 ENV PGDATABASE=testdb
 ENV PGHOST=postgres
 
-# По умолчанию запускаем бинарник (compose может переопределить command)
-CMD ["/usr/local/bin/englearn"]
-
+CMD ["/app/bin/englearn"]

@@ -2,6 +2,7 @@
 #include "router.h"
 #include "handlers/text_handler.h"
 #include "handlers/card_handler.h"
+#include "handlers/generate_handler.h"
 #include "dbug/dbug.h"
 #include <stdio.h>
 #include "libs/http.h"
@@ -32,6 +33,10 @@ void init_router(void)
 
 	if (http_register_handler("POST", "/api/me",    handle_me) != 0) {
 		ERROR_PRINT("Failed to register handler for POST /api/me\n");
+	}
+
+	if (http_register_handler("POST", "/api/generate_card", handle_generate_card) != 0) {
+		ERROR_PRINT("Failed to register handler for POST /api/generate_card\n");
 	}
 }
 

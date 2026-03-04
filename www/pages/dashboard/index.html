@@ -23,15 +23,26 @@
   <main class="dashboard-main container">
     <h2>Добро пожаловать, <span id="user-welcome">гость</span></h2>
     <p>Это пример страницы дашборда. Здесь будут статистика и ссылки на функции.</p>
-
+  
     <section class="cards">
       <div class="card">Words learned: <strong id="stat-words">0</strong></div>
       <div class="card">Active lessons: <strong id="stat-lessons">0</strong></div>
     </section>
+  
+    <section class="card-generator">
+      <h3>Генерация карточки слова</h3>
+  
+      <div class="generator">
+        <label for="word" class="visually-hidden">Word</label>
+        <input id="word" type="text" placeholder="Введите слово" aria-label="Word" />
+  
+        <button id="gen" class="btn">Generate</button>
+      </div>
+  
+      <div id="result" class="card-result" aria-live="polite"></div>
+    </section>
+  
   </main>
-
-  <script src="../../assets/js/utils.js"></script>
-  <script src="../../assets/js/api.js"></script>
-  <script src="../../assets/js/dashboard.js"></script>
+  <script type="module" src="/src/pages/dashboard.ts"></script>
 </body>
 </html>

@@ -1,6 +1,7 @@
 # docker/ollama/mock_server.py
 from flask import Flask, jsonify, request
 import re
+import json   # добавлено для сериализации карточки в строку
 
 app = Flask(__name__)
 
@@ -15,7 +16,6 @@ MODEL_INFO = {
 @app.route("/api/tags", methods=["GET"])
 def list_models():
     return jsonify([MODEL_INFO])
-
 
 def extract_word_from_prompt(prompt: str) -> str:
     """
@@ -37,7 +37,6 @@ def extract_word_from_prompt(prompt: str) -> str:
 
     return "unknown"
 
-
 @app.route("/v1/generate", methods=["POST"])
 @app.route("/api/generate", methods=["POST"])
 def generate():
@@ -46,8 +45,8 @@ def generate():
 
     word = extract_word_from_prompt(prompt)
 
-    # Возвращаем структуру, которую ожидает твой C-парсер
-    return jsonify({
+    # Формируем карточку как словарь
+    card = {
         "word": word,
         "translation": "_______________",
         "transcription": "ˈtest",
@@ -55,13 +54,20 @@ def generate():
             {"text": f"This is a test sentence with the word '{word}'."},
             {"text": f"Another example using '{word}' in context."}
         ]
-    })
+    }
 
+    # Преобразуем карточку в JSON-строку (как это делает реальная Ollama)
+    card_json = json.dumps(card, ensure_ascii=False)
+
+    # Возвращаем в формате реального Ollama
+    return jsonify({
+        "response": card_json,
+        "done": True
+    })
 
 @app.route("/ping")
 def ping():
     return "pong"
-
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=11434)

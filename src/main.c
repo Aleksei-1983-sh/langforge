@@ -1,4 +1,4 @@
-/* main.c */
+/* ./main.c */
 #include <unistd.h>   /* для unlink() */
 #include <errno.h>
 #include <string.h>
@@ -6,10 +6,12 @@
 #include <stdlib.h>
 #include <signal.h>
 
+#include "ollama/ollama.h"
 #include "dbug/dbug.h"
 #include "router.h"
 #include "db/db.h"
 #include "libs/http.h"
+#include "card_handler.h"
 
 #define LISTEN_PORT 1234
 
@@ -25,8 +27,8 @@ static void sigint_handler(int signo)
 /* Удаляем лог-файл отладки */
 void delete_debug_log(void)
 {
-	//const char *filepath = "./build/log/debug.log";
-	const char *filepath = "/home/di/projects_С/git_progect/langforge/debug.log";
+	const char *filepath = "/app/debug.log";
+//	const char *filepath = "/home/di/projects_С/git_progect/langforge/debug.log";
 	if (unlink(filepath) == 0) {
 		printf("file deleted %s.\n", filepath);
 	} else {
@@ -41,6 +43,9 @@ void delete_debug_log(void)
 
 int main(void)
 {
+	delete_debug_log();
+
+	DEBUG_PRINT_MAIN("START SERVER !!!!!!!!!!!!!!!!!");
 	/* Установка обработчика SIGINT, чтобы можно было CTRL+C остановить сервер */
 	struct sigaction sa;
 	sa.sa_handler = sigint_handler;
@@ -52,30 +57,11 @@ int main(void)
 		/* Продолжаем без корректной обработки SIGINT, но предупредим */
 	}
 
-	/* Инициализация БД */
-	const char *pguser = getenv("PGUSER");
-	const char *pgpass = getenv("PGPASSWORD");
-	const char *pgdb   = getenv("PGDATABASE");
-	const char *pghost = getenv("PGHOST");
+	ollama_init();
+	/* Инициализация db conninfo */
+	db_init_conninfo();
 
-	char conninfo[256];
-	snprintf(conninfo, sizeof(conninfo),
-			 "host=%s dbname=%s user=%s password=%s",
-			 pghost ? pghost : "localhost",
-			 pgdb   ? pgdb   : "englearn",
-			 pguser ? pguser : "enguser",
-			 pgpass ? pgpass : "engpass");
-
-	if (db_connect(conninfo) != 0) return 1;
-	const char *path_db = "/home/di/projects_С/git_progect/langforge/src/db/schema.sql";
-	if (init_db(path_db) != 0)
-	{
-		fprintf(stderr, "Failed to initialize database\n");
-		db_disconnect();
-		return 1;
-	}
-	DEBUG_PRINT_MAIN("Initialize database OK!");
-	delete_debug_log();
+	resolve_www_dir();
 
 	/* Инициализация маршрутов.
 	 * Внутри init_router() вы должны зарегистрировать все нужные пути:
@@ -107,11 +93,6 @@ int main(void)
 	 *
 	 * Для отладки можно добавить:
 	 */
-#ifdef DEBUG
-	/* Если хотите видеть все запросы даже без точной регистрации: */
-	/* http_register_handler("GET", "/", generic_http_handler); */
-	/* http_register_handler("POST", "/", generic_http_handler); */
-#endif
 
 	/* Основной цикл: опрашиваем сервер */
 	while (keep_running)

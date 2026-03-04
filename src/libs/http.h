@@ -4,7 +4,7 @@
 #define HTTP_H
 
 #include <stddef.h>
-
+#include "dbug/dbug.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -15,16 +15,16 @@ extern "C" {
 
 	// ===================== Отладка =====================
 // При компиляции с -DDEBUG=1 активируется этот макрос:
-#if defined(DEBUG) && DEBUG == 1
+#if defined(DEBUG_GENERAL) && DEBUG_GENERAL == 1
 #define DBG(fmt, ...) \
-  fprintf(stderr, "[DEBUG_HTTP][%s:%d] " fmt "\n", __func__, __LINE__, ##__VA_ARGS__)
+	  DEBUG(fmt, ##__VA_ARGS__)
 #else
 #define DBG(fmt, ...) ((void)0)
 #endif
 
 #if defined(DEBUG_REQUEST) && DEBUG_REQUEST == 1
 #define DBG_REQUEST(fmt, ...) \
-  fprintf(stderr, "[DEBUG_HTTP][%s:%d] " fmt "\n", __func__, __LINE__, ##__VA_ARGS__)
+	  DEBUG(fmt, ##__VA_ARGS__)
 #else
 #define DBG_REQUEST(fmt, ...) ((void)0)
 #endif
@@ -32,10 +32,10 @@ extern "C" {
 // ===================== HTTP КЛИЕНТ =====================
 // Возвращает HTTP статус-код или -1 при ошибке.
 // Выделяет *response_out через malloc; освободить через http_free_response().
-int http_get(const char *host, int port, const char *path,
+int http_get(const char *host,const char *port, const char *path,
              const char *headers[], char **response_out);
 
-int http_post(const char *host, int port, const char *path,
+int http_post(const char *host,const char *port, const char *path,
               const char *body, const char *headers[], char **response_out);
 
 void http_free_response(char *response);

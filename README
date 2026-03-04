@@ -1,16 +1,196 @@
 необходимо проверить 
 
+apt-get update && apt-get install -y strace
+
+strace -f -o /tmp/strace.log /usr/local/bin/englearn
+
+strace -f -o /tmp/strace.log /app/tests/start_server.sh
+
+tail -n 50 /tmp/strace.log
+
 чтобы запустьть докер локально 
 docker compose up --build
 
 чтобы остановить 
  docker compose down -v
 
+ проверить состояния контенеров 
+docker compose ps
+-----------------------------------------------------------------------------------
  чтобы зайти в какойто докер кантейнер например в ollama 
 docker compose exec ollama sh
 docker compose exec backend bash
 
+docker compose exec postgres bash
+	psql -U testuser -d testdb -h postgres -W
+	testpass
+	\dt
+	SELECT * FROM users;
+----------------------------------------------------------------------------------
+
+
+
 я предлогаю реализовать полноценный путь запроса карточки чере сервер от клиенда ,
 
 клиает отправляет запрос со словам (в роли клиента curl) > сервер понимает что надо обработать  в llm чтобы 
-чтобы сгенереть карточку со словом  слова >> llm генерит карточку >>> сервер получает карточку и передает клиенту >> 
+чтобы сгенереть карточку со словом  слова >> llm генерит карточку >>> сервер получает карточку и передает клиенту >>
+
+проверка с клиента
+
+docker compose exec client sh
+
+curl http://backend:1234/api/generate_card \
+  -H "Content-Type: application/json" \
+  -d '{"word":"apple"}'
+
+# регистрация
+curl -i -X POST http://backend:1234/api/register \
+  -H "Content-Type: application/json" \
+  --cookie-jar cookies.txt \
+  -d '{"username":"testuser","email":"test@example.com","password":"testpass"}'
+
+# логин (cookie будет сохранён в cookies.txt)
+curl -i -X POST http://backend:1234/api/login \
+  -H "Content-Type: application/json" \
+  --cookie-jar cookies.txt \
+  --cookie cookies.txt \
+  -d '{"username":"testuser","password":"testpass"}'
+
+# проверить /api/me (отправляем cookie)
+curl -i -X POST http://backend:1234/api/me --cookie cookies.txt
+
+
+
+
+Теперь у тебя:
+
+токен хранится в виде SHA256
+
+TTL управляется сервером
+
+sliding expiration
+
+БД считает время (правильно)
+
+нет timezone багов
+
+нет ISO строк в C
+
+нет ручной арифметики времени
+
+Это production-уровень.
+
+
+
+
+
+                                   ┌────────────────────────────┐
+                                   │        Docker Host         │
+                                   │    (твоя Linux машина)     │
+                                   └──────────────┬─────────────┘
+                                                  │
+                                      Docker bridge network
+                                                  │
+        ┌─────────────────────────────────────────┼─────────────────────────────────────────┐
+        │                                         │                                         │
+        ▼                                         ▼                                         ▼
+
+┌──────────────────────┐              ┌──────────────────────┐              ┌──────────────────────┐
+│       backend        │              │       postgres       │              │        ollama        │
+│    (C HTTP server)   │              │     (DB server)      │              │      (LLM mock)      │
+│──────────────────────│              │──────────────────────│              │──────────────────────│
+│ HTTP : 8080          │              │ TCP : 5432           │              │ HTTP : 11434         │
+│                      │              │                      │              │                      │
+│ PGHOST=postgres ─────┼────────────► │ listens 0.0.0.0      │              │ /v1/generate         │
+│ PGUSER=testuser      │    TCP       │                      │              │                      │
+│ PGPASSWORD=testpass  │    5432      │                      │              │                      │
+│ PGDATABASE=testdb    │              │                      │              │                      │
+└─────────────┬────────┘              └─────────────┬────────┘              └─────────────┬────────┘
+              │                                     │                                     │
+              │                                     │                                     │
+              ▼                                     ▼                                     ▼
+
+      ┌───────────────────┐              ┌────────────────────────────┐
+      │  HTTP Router      │              │  /var/lib/postgresql/data  │
+      │  Handlers         │              │        (DATA FILES)        │
+      │───────────────────│              │────────────────────────────│
+      │ /api/login        │              │ base/                      │
+      │ /api/register     │              │ global/                    │
+      │ /api/cards        │              │ pg_wal/                    │
+      │ /api/me           │              │ ...                        │
+      └─────────┬─────────┘              └─────────────┬──────────────┘
+                │                                      │
+                │                                      │
+                ▼                                      ▼
+         libpq (C client)                      Docker Volume (если есть)
+                │                                      │
+                ▼                                      ▼
+          PostgreSQL Server                 /var/lib/docker/volumes/
+                                                    postgres_data/_data
+
+┌───────────────────────────────────────────────────────────────┐
+│                       LEVEL 0 — CLIENT                        │
+├───────────────────────────────────────────────────────────────┤
+│  Browser / curl                                               │
+│  POST /api/login                                              │
+└───────────────┬───────────────────────────────────────────────┘
+                │ TCP
+                ▼
+┌───────────────────────────────────────────────────────────────┐
+│                 LEVEL 1 — HTTP SERVER (C)                     │
+├───────────────────────────────────────────────────────────────┤
+│  http_server_poll()                                           │
+│    ├── accept()                                               │
+│    ├── recv()                                                 │
+│    ├── parse_request()                                        │
+│    └── route_request()                                        │
+└───────────────┬───────────────────────────────────────────────┘
+                │
+                ▼
+┌───────────────────────────────────────────────────────────────┐
+│                 LEVEL 2 — ROUTER / HANDLERS                   │
+├───────────────────────────────────────────────────────────────┤
+│  handle_login()                                               │
+│  handle_register()                                            │
+│  handle_cards()                                               │
+│  handle_me()                                                  │
+│                                                               │
+│  Здесь:                                                       │
+│   - парсится JSON (cJSON)                                     │
+│   - проверяется cookie                                        │
+│   - вызываются db_* функции                                   │
+└───────────────┬───────────────────────────────────────────────┘
+                │
+                ▼
+┌───────────────────────────────────────────────────────────────┐
+│                 LEVEL 3 — DB WRAPPER (db.c)                   │
+├───────────────────────────────────────────────────────────────┤
+│  db_connect()  → PQconnectdb()                                │
+│  db_login_user()                                              │
+│  db_create_session()                                          │
+│  db_add_word()                                                │
+│  db_get_all_words()                                           │
+│                                                               │
+│  Здесь:                                                       │
+│   - формируются SQL                                           │
+│   - вызывается PQexecParams()                                 │
+│   - читаются результаты                                       │
+└───────────────┬───────────────────────────────────────────────┘
+                │ libpq
+                ▼
+┌───────────────────────────────────────────────────────────────┐
+│                 LEVEL 4 — libpq (Postgres client)             │
+├───────────────────────────────────────────────────────────────┤
+│  Формирует PostgreSQL wire protocol                           │
+│  Открывает TCP сокет к PGHOST:5432                            │
+└───────────────┬───────────────────────────────────────────────┘
+                │ TCP
+                ▼
+┌───────────────────────────────────────────────────────────────┐
+│                 LEVEL 5 — POSTGRES CONTAINER                  │
+├───────────────────────────────────────────────────────────────┤
+│  postgres server process                                      │
+│  принимает SQL                                                │
+│  пишет данные в:                                              │
+│     /var/lib/postgresql/data                                  │
+└───────────────────────────────────────────────────────────────┘

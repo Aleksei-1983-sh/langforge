@@ -1,5 +1,8 @@
+#./Makefile
 CC = gcc
-CFLAGS = -O2 -Wall -Wextra -I./src -I./src/libs -I./src/db -I/usr/include -I/usr/include/postgresql -DDEBUG_REQUEST=1
+CFLAGS = -O2 -Wall -Wextra -I./src -I./src/libs -I./src/db \
+		 -I./src/dbug -I./src/handlers -I./src/models -I./src/ollama -I./src/utils \
+		 -I/usr/include -I/usr/include/postgresql -DDEBUG_REQUEST=1 -DDEBUG_GENERAL=1
 LDFLAGS = -lpq -lcrypto
 SRCDIR = src
 BINDIR = ./bin
@@ -29,7 +32,7 @@ clean:
 
 # Запуск тестов: по умолчанию вызывает скрипт в tests/
 test:
-	@if [ -x ./tests/run_tests.sh ]; then ./tests/run_tests.sh; else echo "No tests/run_tests.sh found"; fi
+	@if [ -x ./tests/run_tests.sh ]; then ./tests/run_tests.sh; else echo "No tests/start_server_old.sh found"; fi
 
 
 
