@@ -10,4 +10,3 @@
 - pages/dashboard/index.html + assets/css/dashboard.css + assets/js/dashboard.js
 - assets/img/logo.svg
 
-Архив с проектом: www_full_project.zip

@@ -7,3 +7,13 @@
 .dashboard-main { padding: 28px 20px; }
 .cards { display:flex; gap:16px; margin-top:18px; }
 .card { background:#fff; padding:18px; border-radius:8px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); flex:1; }
+
+/* dashboard.css - добавь куда логично */
+.word-card { padding: 1rem; border: 1px solid #e0e0e0; border-radius: 6px; background:#fff; }
+.word-card .word { margin: 0 0 .25rem 0; font-size:1.5rem; }
+.transcription { color:#666; margin-bottom:.5rem; }
+.translation { margin: .5rem 0; font-weight:500; }
+.examples h4 { margin: .5rem 0; font-size:1rem; }
+.examples ul { margin:0; padding-left:1.25rem; }
+.loading { color:#666; }
+.error { color:crimson; }
