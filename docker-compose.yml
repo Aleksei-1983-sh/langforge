@@ -24,7 +24,7 @@ services:
       - ollama_models:/var/lib/ollama/models
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:11434/ping"]
-      interval: 30s
+      interval: 5s
       timeout: 5s
       retries: 5
 

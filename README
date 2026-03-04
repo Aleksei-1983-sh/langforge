@@ -16,10 +16,19 @@ docker compose up --build
 
  проверить состояния контенеров 
 docker compose ps
-
+-----------------------------------------------------------------------------------
  чтобы зайти в какойто докер кантейнер например в ollama 
 docker compose exec ollama sh
 docker compose exec backend bash
+
+docker compose exec postgres bash
+	psql -U testuser -d testdb -h postgres -W
+	testpass
+	\dt
+	SELECT * FROM users;
+----------------------------------------------------------------------------------
+
+
 
 я предлогаю реализовать полноценный путь запроса карточки чере сервер от клиенда ,
 
@@ -48,7 +57,28 @@ curl -i -X POST http://backend:1234/api/login \
   -d '{"username":"testuser","password":"testpass"}'
 
 # проверить /api/me (отправляем cookie)
-curl -i http://backend:1234/api/me --cookie cookies.txt
+curl -i -X POST http://backend:1234/api/me --cookie cookies.txt
+
+
+
+
+Теперь у тебя:
+
+токен хранится в виде SHA256
+
+TTL управляется сервером
+
+sliding expiration
+
+БД считает время (правильно)
+
+нет timezone багов
+
+нет ISO строк в C
+
+нет ручной арифметики времени
+
+Это production-уровень.
 
 
 
