@@ -29,7 +29,7 @@ const WordCardSchema = z.object({
  * описанную в WordCardSchema.
  */
 export async function generateCard(word: string): Promise<WordCard> {
-  const res = await fetch('/api/generate_card', {
+  const res = await fetch('/api/v1/generate_card', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include',
@@ -58,8 +58,7 @@ export async function login(
   username: string,
   password: string
 ): Promise<{ success: boolean; user_id?: number }> {
-
-  const res = await fetch('/api/login', {
+  const res = await fetch('/api/v1/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     credentials: 'include', // если используешь cookie-сессию
@@ -95,7 +94,7 @@ export async function register(
   password: string
 ): Promise<void> {
 
-  await postJson('/api/register', {
+  await postJson('/api/v1/register', {
     username,
     email,
     password
