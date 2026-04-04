@@ -1,3 +1,4 @@
+#.github/workflows/ci.yml 
 name: CI
 
 on:
@@ -71,18 +72,18 @@ jobs:
           echo "backend is running: $BACK_CID"
 
       - name: Cleanup before tests
-          run: |
-            # Останавливаем все контейнеры
-            docker compose down
-            # Удаляем возможные процессы на порту 1234
-            docker compose run --rm backend sh -c "pkill -f englearn || true"
-            # Запускаем заново
-            docker compose up -d
-            # Даем время на инициализацию
-            sleep 5
+        run: |
+          # Останавливаем все контейнеры
+          docker compose down
+          # Удаляем возможные процессы на порту 1234
+          docker compose run --rm backend sh -c "pkill -f englearn || true"
+          # Запускаем заново
+          docker compose up -d
+          # Даем время на инициализацию
+          sleep 5
 
       - name: Run backend tests
-          run: |
+        run: |
           # запускаем тесты внутри работающего контейнера backend
           docker compose exec -T backend /app/tests/start_server_old.sh
 
