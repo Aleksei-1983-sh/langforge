@@ -635,6 +635,52 @@ int db_add_word(const char *word, const char *transcription,
     return success ? 0 : -1;
 }
 
+int db_create_word(const db_word_create_input_t *input, int *out_word_id)
+{
+    if (!input || !input->word) {
+        return DB_ERR_INVALID_ARGUMENT;
+    }
+
+    /*
+     * TODO:
+     * - перейти на INSERT ... RETURNING id;
+     * - сохранять example_1/example_2 по актуальной схеме;
+     * - возвращать DB_ERR_CONFLICT при unique violation.
+     */
+    if (db_add_word(input->word,
+                    input->transcription,
+                    input->translation,
+                    input->example_1,
+                    input->user_id) != 0) {
+        return DB_ERR_SERVER;
+    }
+
+    if (out_word_id) {
+        *out_word_id = 0;
+    }
+
+    return DB_OK;
+}
+
+int db_get_word(const db_word_get_query_t *query, Word *out_word)
+{
+    (void)query;
+    (void)out_word;
+    return DB_ERR_NOT_IMPLEMENTED;
+}
+
+int db_update_word(const db_word_update_input_t *input)
+{
+    (void)input;
+    return DB_ERR_NOT_IMPLEMENTED;
+}
+
+int db_delete_word(const db_word_delete_input_t *input)
+{
+    (void)input;
+    return DB_ERR_NOT_IMPLEMENTED;
+}
+
 int db_get_all_words(Word **out_list, size_t *out_count, int user_id) {
     const char *paramValues[1];
     char user_id_str[16];
@@ -642,7 +688,8 @@ int db_get_all_words(Word **out_list, size_t *out_count, int user_id) {
     paramValues[0] = user_id_str;
 
     PGresult *res = PQexecParams(db_conn,
-        "SELECT word, transcription, translation, example FROM words WHERE user_id = $1;",
+        "SELECT id, user_id, word, transcription, translation, example_1, example_2 "
+        "FROM words WHERE user_id = $1;",
         1, NULL, paramValues, NULL, NULL, 0);
 
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
@@ -653,16 +700,51 @@ int db_get_all_words(Word **out_list, size_t *out_count, int user_id) {
     int rows = PQntuples(res);
     Word *arr = malloc(rows * sizeof(Word));
     for (int i = 0; i < rows; ++i) {
-        arr[i].word = strdup(PQgetvalue(res, i, 0));
-        arr[i].transcription = strdup(PQgetvalue(res, i, 1));
-        arr[i].translation = strdup(PQgetvalue(res, i, 2));
-        arr[i].example = strdup(PQgetvalue(res, i, 3));
+        arr[i].id = atoi(PQgetvalue(res, i, 0));
+        arr[i].user_id = atoi(PQgetvalue(res, i, 1));
+        arr[i].word = strdup(PQgetvalue(res, i, 2));
+        arr[i].transcription = strdup(PQgetvalue(res, i, 3));
+        arr[i].translation = strdup(PQgetvalue(res, i, 4));
+        arr[i].example_1 = strdup(PQgetvalue(res, i, 5));
+        arr[i].example_2 = strdup(PQgetvalue(res, i, 6));
+        arr[i].example = arr[i].example_1;
     }
     PQclear(res);
 
     *out_list = arr;
     *out_count = rows;
     return 0;
+}
+
+void db_free_word(Word *word)
+{
+    if (!word) return;
+
+    free(word->word);
+    free(word->transcription);
+    free(word->translation);
+    free(word->example_1);
+    free(word->example_2);
+
+    word->word = NULL;
+    word->transcription = NULL;
+    word->translation = NULL;
+    word->example_1 = NULL;
+    word->example_2 = NULL;
+    word->example = NULL;
+    word->id = 0;
+    word->user_id = 0;
+}
+
+void db_free_word_list(Word *words, size_t count)
+{
+    if (!words) return;
+
+    for (size_t i = 0; i < count; ++i) {
+        db_free_word(&words[i]);
+    }
+
+    free(words);
 }
 
 /* --- db_get_user_profile: заполняет username, words_learned и active_lessons.
