@@ -1,8 +1,8 @@
 #include "libs/cJSON.h"
 #include "dbug/dbug.h"
-#include "db/db.h"
 #include "libs/http.h"
-#include "libs/validate.h"
+#include "services/user_service.h"
+#include "services/card_service.h"
 
 #include <string.h> /* strcmp, strchr, strncmp, memcpy */
 #include <stdlib.h> /* atoi, free */
@@ -146,43 +146,6 @@ void resolve_www_dir(void)
     DEBUG_PRINT_CARD_HANDLER(
         "resolve_www_dir: absolute www not found, fallback to relative 'www'");
     DEBUG_PRINT_CARD_HANDLER("resolve_www_dir: === END ===");
-}
-
-static int get_session_ttl_from_env(void)
-{
-    const char *s = getenv("SESSION_MAX_AGE");
-    if (!s || s[0] == '\0') return 2592000; /* 30 days default */
-    char *endptr = NULL;
-    long v = strtol(s, &endptr, 10);
-    if (endptr == s || v <= 0) return 2592000;
-    return (int)v;
-}
-
-/* --- helper: получить значение cookie по имени (malloc -> нужно free) --- */
-static char *cookie_get_value(const char *cookie_header, const char *name)
-{
-    if (!cookie_header || !name) return NULL;
-    size_t nlen = strlen(name);
-    const char *p = cookie_header;
-    while (*p) {
-        /* skip leading spaces and semicolons */
-        while (*p == ' ' || *p == ';') ++p;
-        if (strncmp(p, name, nlen) == 0 && p[nlen] == '=') {
-            const char *v = p + nlen + 1;
-            const char *q = v;
-            while (*q && *q != ';') ++q;
-            size_t vlen = q - v;
-            char *out = malloc(vlen + 1);
-            if (!out) return NULL;
-            memcpy(out, v, vlen);
-            out[vlen] = '\0';
-            return out;
-        }
-        /* advance to next cookie */
-        while (*p && *p != ';') ++p;
-        if (*p == ';') ++p;
-    }
-    return NULL;
 }
 
 /*
@@ -509,7 +472,7 @@ handle_cards(http_connection_t *conn, http_request_t *req)
 
         Word *words = NULL;
         size_t count = 0;
-        if (db_get_all_words(&words, &count, user_id) != 0) {
+        if (card_service_list(user_id, &words, &count) != CARD_SERVICE_OK) {
             http_send_response(conn, 500, "text/plain",
                                "DB Error\n", strlen("DB Error\n"));
             DBG("EXIT handle_cards GET: DB error");
@@ -520,13 +483,7 @@ handle_cards(http_connection_t *conn, http_request_t *req)
         if (!json_array) {
             /* Ошибка аллокации */
             /* Освобождаем полученные слова */
-            for (size_t i = 0; i < count; i++) {
-                free(words[i].word);
-                free(words[i].transcription);
-                free(words[i].translation);
-                free(words[i].example);
-            }
-            free(words);
+            card_service_free_words(words, count);
             http_send_response(conn, 500, "text/plain",
                                "Server error\n", strlen("Server error\n"));
             DBG("EXIT handle_cards GET: JSON alloc error");
@@ -542,13 +499,8 @@ handle_cards(http_connection_t *conn, http_request_t *req)
                 cJSON_AddStringToObject(item, "example", words[i].example ? words[i].example : "");
                 cJSON_AddItemToArray(json_array, item);
             }
-            /* Освобождаем память из db_get_all_words */
-            free(words[i].word);
-            free(words[i].transcription);
-            free(words[i].translation);
-            free(words[i].example);
         }
-        free(words);
+        card_service_free_words(words, count);
 
         char *out = cJSON_PrintUnformatted(json_array);
         cJSON_Delete(json_array);
@@ -611,7 +563,7 @@ handle_cards(http_connection_t *conn, http_request_t *req)
             return;
         }
 
-        if (db_add_word(word, transcription, translation, example, user_id) != 0) {
+        if (card_service_add(word, transcription, translation, example, user_id) != CARD_SERVICE_OK) {
             cJSON_Delete(json_req);
             http_send_response(conn, 500, "text/plain",
                                "DB Error\n", strlen("DB Error\n"));
@@ -697,18 +649,14 @@ void handle_login(http_connection_t *conn, http_request_t *req)
 
     DEBUG_PRINT_CARD_HANDLER("attempt login username='%s'", username);
 
-    /* db_login_user contract:
-       >=0  : user_id
-       -1   : invalid credentials
-       -2   : db / internal error
-    */
-    int user_id = db_login_user(username, password);
+    int user_id = 0;
+    char *cookie_hdr = NULL;
+    int service_rc = user_service_login(username, password, &user_id, &cookie_hdr);
 
-    DEBUG_PRINT_CARD_HANDLER("db_login_user -> %d", user_id);
+    DEBUG_PRINT_CARD_HANDLER("user_service_login -> %d, user_id=%d", service_rc, user_id);
 
-    if (user_id == -2) {
-        /* DB/internal error */
-        ERROR_PRINT("db_login_user returned error");
+    if (service_rc == USER_SERVICE_ERR_SERVER) {
+        ERROR_PRINT("user_service_login returned server error");
 
         const char *json_hdrs[] = { "Cache-Control: no-store", "X-Content-Type-Options: nosniff" };
         log_response_headers(500, "application/json", json_hdrs, sizeof(json_hdrs)/sizeof(json_hdrs[0]));
@@ -724,8 +672,7 @@ void handle_login(http_connection_t *conn, http_request_t *req)
         return;
     }
 
-    if (user_id == -1) {
-        /* invalid credentials */
+    if (service_rc == USER_SERVICE_ERR_INVALID_CREDENTIALS) {
         DEBUG_PRINT_CARD_HANDLER("invalid credentials for username='%s'", username);
 
         const char *json_hdrs[] = { "Cache-Control: no-store", "X-Content-Type-Options: nosniff" };
@@ -737,49 +684,6 @@ void handle_login(http_connection_t *conn, http_request_t *req)
         send_json_response(conn, 401, err);
         cJSON_Delete(err);
 
-        cJSON_Delete(json_req);
-        DEBUG_PRINT_CARD_HANDLER("EXIT handle_login");
-        return;
-    }
-
-    /* Successful authentication: create session */
-    int ttl = 30 * 24 * 3600; /* 30 days */
-    char *session_token = db_create_session(user_id, ttl); /* returns malloc'ed raw token */
-    if (!session_token) {
-        ERROR_PRINT("failed to create session for user %d", user_id);
-
-        const char *json_hdrs[] = { "Cache-Control: no-store", "X-Content-Type-Options: nosniff" };
-        log_response_headers(500, "application/json", json_hdrs, sizeof(json_hdrs)/sizeof(json_hdrs[0]));
-
-        cJSON *err = cJSON_CreateObject();
-        cJSON_AddBoolToObject(err, "success", 0);
-        cJSON_AddStringToObject(err, "message", "Server error");
-        send_json_response(conn, 500, err);
-        cJSON_Delete(err);
-
-        cJSON_Delete(json_req);
-        DEBUG_PRINT_CARD_HANDLER("EXIT handle_login");
-        return;
-    }
-
-    /* Build Set-Cookie header */
-    char cookie_hdr[512];
-    int cookie_len = snprintf(cookie_hdr, sizeof(cookie_hdr),
-        "Set-Cookie: session=%s; Path=/; HttpOnly; SameSite=Lax; Max-Age=%d",
-        session_token, ttl);
-    if (cookie_len < 0 || cookie_len >= (int)sizeof(cookie_hdr)) {
-        ERROR_PRINT("cookie header truncated");
-
-        /* Log and reply 500 */
-        const char *json_hdrs[] = { "Cache-Control: no-store", "X-Content-Type-Options: nosniff" };
-        log_response_headers(500, "application/json", json_hdrs, sizeof(json_hdrs)/sizeof(json_hdrs[0]));
-
-        free(session_token);
-        cJSON *err = cJSON_CreateObject();
-        cJSON_AddBoolToObject(err, "success", 0);
-        cJSON_AddStringToObject(err, "message", "Server error");
-        send_json_response(conn, 500, err);
-        cJSON_Delete(err);
         cJSON_Delete(json_req);
         DEBUG_PRINT_CARD_HANDLER("EXIT handle_login");
         return;
@@ -807,7 +711,7 @@ void handle_login(http_connection_t *conn, http_request_t *req)
     /* Cleanup */
     free(out_text);
     cJSON_Delete(out_obj);
-    free(session_token); /* free raw token after sent in Set-Cookie */
+    free(cookie_hdr);
     cJSON_Delete(json_req);
 
     DEBUG_PRINT_CARD_HANDLER("success user_id=%d (session issued)", user_id);
@@ -858,8 +762,15 @@ void handle_register(http_connection_t *conn, http_request_t *req)
         return;
     }
 
-    /* Небольшая валидация email / password */
-    if (strlen(password) < 6) {
+    DEBUG_PRINT_CARD_HANDLER("handle_register: registering username='%s' email='%s'", username, email);
+
+    int new_user_id = 0;
+    int service_rc = user_service_register(username, email, password, &new_user_id);
+
+    DEBUG_PRINT_CARD_HANDLER("handle_register: user_service_register returned %d user_id=%d",
+                             service_rc, new_user_id);
+
+    if (service_rc == USER_SERVICE_ERR_PASSWORD_TOO_SHORT) {
         DEBUG_PRINT_CARD_HANDLER("handle_register: password too short");
         cJSON *res = cJSON_CreateObject();
         cJSON_AddBoolToObject(res, "success", 0);
@@ -869,10 +780,7 @@ void handle_register(http_connection_t *conn, http_request_t *req)
         cJSON_Delete(json_req);
         DEBUG_PRINT_CARD_HANDLER("EXIT handle_register");
         return;
-    }
-
-    /* Проверка email с помощью regex */
-    if (!is_valid_email(email)) {
+    } else if (service_rc == USER_SERVICE_ERR_INVALID_EMAIL) {
         DEBUG_PRINT_CARD_HANDLER("handle_register: invalid email '%s'", email);
         cJSON *res = cJSON_CreateObject();
         cJSON_AddBoolToObject(res, "success", 0);
@@ -882,16 +790,7 @@ void handle_register(http_connection_t *conn, http_request_t *req)
         cJSON_Delete(json_req);
         DEBUG_PRINT_CARD_HANDLER("EXIT handle_register");
         return;
-    }
-
-    DEBUG_PRINT_CARD_HANDLER("handle_register: registering username='%s' email='%s'", username, email);
-
-    /* db_register_user должен вернуть >=0 user_id при успехе, <0 при ошибке (например уже существует) */
-    int new_user_id = db_register_user(username, email, password);
-
-    DEBUG_PRINT_CARD_HANDLER("handle_register: db_register_user returned %d", new_user_id);
-
-    if (new_user_id > 0) {
+    } else if (service_rc == USER_SERVICE_OK && new_user_id > 0) {
         /* Успешно создан пользователь, возвращаем 201 + id */
         cJSON *res = cJSON_CreateObject();
         cJSON_AddBoolToObject(res, "success", 1);
@@ -902,7 +801,7 @@ void handle_register(http_connection_t *conn, http_request_t *req)
         DEBUG_PRINT_CARD_HANDLER("success user_id=%d", new_user_id);
         DEBUG_PRINT_CARD_HANDLER("EXIT handle_register");
         return;
-    } else if (new_user_id == 0) {
+    } else if (service_rc == USER_SERVICE_OK && new_user_id == 0) {
         /* Вставка прошла, но id не возвращён — редкий случай.
            Считаем это успешной регистрацией, отдаём 201 без user_id, но логируем. */
         DEBUG_PRINT_CARD_HANDLER("insert OK but no id returned (new_user_id==0)");
@@ -915,7 +814,7 @@ void handle_register(http_connection_t *conn, http_request_t *req)
         cJSON_Delete(json_req);
         DEBUG_PRINT_CARD_HANDLER("EXIT handle_register");
         return;
-    } else if (new_user_id == -2) {
+    } else if (service_rc == USER_SERVICE_ERR_CONFLICT) {
         /* Конфликт — пользователь уже существует */
         DEBUG_PRINT_CARD_HANDLER("conflict (user exists)");
         cJSON *res = cJSON_CreateObject();
@@ -927,8 +826,7 @@ void handle_register(http_connection_t *conn, http_request_t *req)
         DEBUG_PRINT_CARD_HANDLER("EXIT handle_register");
         return;
     } else {
-        /* new_user_id == -1 или любой другой отрицательный код — внутренняя ошибка */
-        ERROR_PRINT("handle_register: db_register_user failed with code=%d", new_user_id);
+        ERROR_PRINT("handle_register: user_service_register failed with code=%d", service_rc);
         cJSON *res = cJSON_CreateObject();
         cJSON_AddBoolToObject(res, "success", 0);
         cJSON_AddStringToObject(res, "message", "Registration failed due to server error");
@@ -977,9 +875,10 @@ void handle_me(http_connection_t *conn, http_request_t *req)
         return;
     }
 
-    char *session_token = cookie_get_value(cookie_hdr, "session");
-    if (!session_token) {
-        DEBUG_PRINT_CARD_HANDLER("session cookie not found");
+    user_profile_t profile;
+    int service_rc = user_service_get_profile(cookie_hdr, &profile);
+    if (service_rc == USER_SERVICE_ERR_UNAUTHORIZED) {
+        DEBUG_PRINT_CARD_HANDLER("session cookie not found or invalid");
         cJSON *resp = cJSON_CreateObject();
         cJSON_AddBoolToObject(resp, "success", 0);
         cJSON_AddStringToObject(resp, "message", "Unauthorized");
@@ -989,71 +888,31 @@ void handle_me(http_connection_t *conn, http_request_t *req)
         return;
     }
 
-    DEBUG_PRINT_CARD_HANDLER("found session token (len=%zu) preview='%.8s'", strlen(session_token), session_token);
-
-    /* Получаем ttl (сек) из окружения или используем дефолт */
-    int ttl = get_session_ttl_from_env();
-    DEBUG_PRINT_CARD_HANDLER("Using SESSION_MAX_AGE=%d seconds for session validation/refresh", ttl);
-
-    /* Проверяем сессию и выполняем sliding expiration (если валидна) */
-    int uid = db_userid_by_session(session_token, ttl);
-    if (uid == -1) {
-        /* internal DB error (в реализации db_userid_by_session: -1 = error) */
-        ERROR_PRINT("db_userid_by_session error");
-        free(session_token);
+    if (service_rc != USER_SERVICE_OK) {
+        ERROR_PRINT("user_service_get_profile failed with code=%d", service_rc);
         cJSON *resp = cJSON_CreateObject();
         cJSON_AddBoolToObject(resp, "success", 0);
         cJSON_AddStringToObject(resp, "message", "Server error");
         send_json_response(conn, 500, resp);
         cJSON_Delete(resp);
         DEBUG_PRINT_CARD_HANDLER("EXIT ");
-        return;
-    }
-
-    if (uid == 0) {
-        /* session not found / expired */
-        DEBUG_PRINT_CARD_HANDLER("session invalid/expired");
-        free(session_token);
-        cJSON *resp = cJSON_CreateObject();
-        cJSON_AddBoolToObject(resp, "success", 0);
-        cJSON_AddStringToObject(resp, "message", "Unauthorized");
-        send_json_response(conn, 401, resp);
-        cJSON_Delete(resp);
-        DEBUG_PRINT_CARD_HANDLER("EXIT");
-        return;
-    }
-
-    /* Получим профиль */
-    char username[256];
-    int words = 0, lessons = 0;
-    int rc = db_get_user_profile(uid, username, sizeof(username), &words, &lessons);
-    if (rc != 0) {
-        ERROR_PRINT("db_get_user_profile failed rc=%d", rc);
-        free(session_token);
-        cJSON *resp = cJSON_CreateObject();
-        cJSON_AddBoolToObject(resp, "success", 0);
-        cJSON_AddStringToObject(resp, "message", "Server error");
-        send_json_response(conn, 500, resp);
-        cJSON_Delete(resp);
-        DEBUG_PRINT_CARD_HANDLER("EXIT");
         return;
     }
 
     /* Формируем JSON-ответ */
     cJSON *resp = cJSON_CreateObject();
     cJSON *user = cJSON_CreateObject();
-    cJSON_AddStringToObject(user, "username", username);
-    cJSON_AddNumberToObject(user, "words_learned", words);
-    cJSON_AddNumberToObject(user, "active_lessons", lessons);
+    cJSON_AddStringToObject(user, "username", profile.username);
+    cJSON_AddNumberToObject(user, "words_learned", profile.words_learned);
+    cJSON_AddNumberToObject(user, "active_lessons", profile.active_lessons);
     cJSON_AddItemToObject(resp, "user", user);
     cJSON_AddBoolToObject(resp, "success", 1);
 
     send_json_response(conn, 200, resp);
 
     cJSON_Delete(resp);
-    free(session_token);
 
-    DEBUG_PRINT_CARD_HANDLER("success user_id=%d username='%s'", uid, username);
+    DEBUG_PRINT_CARD_HANDLER("success username='%s'", profile.username);
     DEBUG_PRINT_CARD_HANDLER("EXIT");
 }
 
