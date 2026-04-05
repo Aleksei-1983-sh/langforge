@@ -12,7 +12,6 @@
 #include "db/db.h"
 #include "libs/http.h"
 #include "libs/redis/redis.h"
-#include "card_handler.h"
 
 #define LISTEN_PORT 1234
 
@@ -62,8 +61,6 @@ int main(void)
 	redis_init();
 	/* Инициализация db conninfo */
 	db_init_conninfo();
-
-	resolve_www_dir();
 
 	/* Инициализация маршрутов.
 	 * Внутри init_router() вы должны зарегистрировать все нужные пути:
