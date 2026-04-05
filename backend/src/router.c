@@ -2,6 +2,7 @@
 #include "router.h"
 #include "handlers/card_handler.h"
 #include "handlers/generate_handler.h"
+#include "handlers/generation_job_handler.h"
 #include "handlers/profile_handler.h"
 #include "handlers/user_handler.h"
 #include "dbug/dbug.h"
@@ -28,6 +29,18 @@ void init_router(void)
 
 	if (http_register_handler("POST", "/api/v1/generate_card", handle_generate_card) != 0) {
 		ERROR_PRINT("Failed to register handler for POST /api/v1/generate_card\n");
+	}
+
+	if (http_register_handler("POST", "/api/v1/generation-jobs", handle_generation_jobs_create) != 0) {
+		ERROR_PRINT("Failed to register handler for POST /api/v1/generation-jobs\n");
+	}
+
+	if (http_register_handler("GET", "/api/v1/generation-jobs/", handle_generation_jobs_routes) != 0) {
+		ERROR_PRINT("Failed to register handler for GET /api/v1/generation-jobs/\n");
+	}
+
+	if (http_register_handler("POST", "/api/v1/generation-jobs/", handle_generation_jobs_routes) != 0) {
+		ERROR_PRINT("Failed to register handler for POST /api/v1/generation-jobs/\n");
 	}
 
 	if (http_register_handler("GET", "/ws", handle_realtime_ws) != 0) {
