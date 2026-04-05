@@ -1,21 +1,10 @@
-/* handlers/generate_handler.c
- *
- * POST /api/generate_card
- * Вход: JSON {"word":"..."}  (utf-8)
- * Вызывает локальный LLM через HTTP (http_post) и возвращает JSON-карточку клиенту.
- *
- * Стиль — практичный, K&R-like.
- */
-
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "cJSON.h"
-#include "http.h"
-#include "db.h"
-#include "dbug.h"
-#include "ollama.h"
+#include "dbug/dbug.h"
+#include "handlers/generate_handler.h"
+#include "libs/cJSON.h"
+#include "services/generate_service.h"
 
 
 /* Простая утилита: извлечь значение строки из простого JSON {"key":"value", ...}
@@ -43,14 +32,15 @@ static char *extract_json_string(const char *json, const char *key)
     return out;
 }
 
-static void print_word_card_to_gebug(const word_card_t *card) {
+static void print_word_card_to_debug(const generate_service_card_t *card)
+{
 	if (!card) return;
 	DEBUG_PRINT_GENERATE_HANDLER("Word: %s", card->word);
 	DEBUG_PRINT_GENERATE_HANDLER("Translation: %s", card->translation);
 	DEBUG_PRINT_GENERATE_HANDLER("Transcription: %s", card->transcription);
 	DEBUG_PRINT_GENERATE_HANDLER("Examples:");
 
-	for (int i = 0; i < NUMBER_OF_EXAMPLES; i++) {
+	for (int i = 0; i < GENERATE_SERVICE_EXAMPLE_COUNT; i++) {
 		if (card->examples[i]) {
 			DEBUG_PRINT_GENERATE_HANDLER("  - %s", card->examples[i]);
 		}
@@ -82,10 +72,14 @@ void handle_generate_card(http_connection_t *conn, http_request_t *req)
 
 	DEBUG_PRINT_GENERATE_HANDLER("generate_card: word='%s'", word);
 
-	/* Генерация карточки через LLM */
-	word_card_t *card = generate_word_card(word);
+	generate_service_request_t service_request;
+	service_request.word = word;
+	service_request.user_id = 0;
+	service_request.persist_if_authenticated = 0;
 
-	if (!card) {
+	generate_service_card_t card;
+	int service_rc = generate_service_generate(&service_request, &card);
+	if (service_rc != GENERATE_SERVICE_OK) {
 		free(word);
 
 		http_send_response(conn, 502,
@@ -95,30 +89,14 @@ void handle_generate_card(http_connection_t *conn, http_request_t *req)
 		return;
 	}
 
-	print_word_card_to_gebug(card);
-
-#if 0
-	/* 4) опционально — сохраняем в БД (user_id = 0 — guest) */
-	/* TODO: извлечь из сессии, если нужно */
-	int user_id = 0; 
-	int dbres = db_add_word(card->word,
-						   card->translation,
-						   card->transcription,
-						   card->example,
-						   user_id);
-
-	if (dbres != 0) {
-		// Ошибка при сохранении — логируем, но всё ещё можем вернуть карточку клиенту
-		ERROR_PRINT("db_add_word failed for word='%s' code=%d", word, dbres);
-	}
-#endif
+	print_word_card_to_debug(&card);
 
 	/* Безопасные значения (если LLM вернул NULL поля) */
-	const char *c_word  = card->word          ? card->word          : "";
-	const char *c_trans = card->transcription ? card->transcription : "";
-	const char *c_tranl = card->translation   ? card->translation   : "";
-	const char *ex1     = card->examples[0]   ? card->examples[0]   : "";
-	const char *ex2     = card->examples[1]   ? card->examples[1]   : "";
+	const char *c_word  = card.word          ? card.word          : "";
+	const char *c_trans = card.transcription ? card.transcription : "";
+	const char *c_tranl = card.translation   ? card.translation   : "";
+	const char *ex1     = card.examples[0]   ? card.examples[0]   : "";
+	const char *ex2     = card.examples[1]   ? card.examples[1]   : "";
 
 	/*
 	 * Формируем JSON.
@@ -143,7 +121,7 @@ void handle_generate_card(http_connection_t *conn, http_request_t *req)
 
 	char *out = malloc(resp_sz);
 	if (!out) {
-		free_word_card(card);
+		generate_service_free_card(&card);
 		free(word);
 
 		http_send_response(conn, 500,
@@ -167,6 +145,6 @@ void handle_generate_card(http_connection_t *conn, http_request_t *req)
 
 	/* cleanup */
 	free(out);
-	free_word_card(card);
+	generate_service_free_card(&card);
 	free(word);
 }

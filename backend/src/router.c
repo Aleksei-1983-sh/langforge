@@ -2,6 +2,8 @@
 #include "router.h"
 #include "handlers/card_handler.h"
 #include "handlers/generate_handler.h"
+#include "handlers/profile_handler.h"
+#include "handlers/user_handler.h"
 #include "dbug/dbug.h"
 #include "libs/http.h"
 
