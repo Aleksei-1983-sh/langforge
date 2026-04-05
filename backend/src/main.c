@@ -12,6 +12,7 @@
 #include "db/db.h"
 #include "libs/http.h"
 #include "libs/redis/redis.h"
+#include "modules/realtime/realtime_hub.h"
 
 #define LISTEN_PORT 1234
 
@@ -59,6 +60,7 @@ int main(void)
 
 	ollama_init();
 	redis_init();
+	rt_hub_init();
 	/* Инициализация db conninfo */
 	db_init_conninfo();
 
@@ -102,6 +104,7 @@ int main(void)
 
 	DEBUG_PRINT_MAIN("Shutting down server...\n");
 	http_server_stop();
+	rt_hub_shutdown();
 
 	return 0;
 }
