@@ -11,6 +11,7 @@
 #include "router.h"
 #include "db/db.h"
 #include "libs/http.h"
+#include "libs/redis/redis.h"
 #include "card_handler.h"
 
 #define LISTEN_PORT 1234
@@ -58,6 +59,7 @@ int main(void)
 	}
 
 	ollama_init();
+	redis_init();
 	/* Инициализация db conninfo */
 	db_init_conninfo();
 

@@ -2,6 +2,7 @@
 
 #include "db/db.h"
 #include "dbug/dbug.h"
+#include "libs/redis/redis.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -60,18 +61,35 @@ int auth_validate_session(const char *cookie_header, int *user_id)
     }
 
     int ttl = get_session_ttl_from_env();
-    int uid = db_userid_by_session(session_token, ttl);
-    free(session_token);
+    int uid = 0;
+    int redis_rc = redis_get_session(session_token, ttl, &uid);
+    if (redis_rc == REDIS_OK && uid > 0) {
+        free(session_token);
+        *user_id = uid;
+        return AUTH_OK;
+    }
+
+    uid = db_userid_by_session(session_token, ttl);
 
     if (uid < 0) {
+        free(session_token);
         ERROR_PRINT("auth_validate_session: db_userid_by_session failed");
         return AUTH_ERR_SERVER;
     }
 
     if (uid == 0) {
+        free(session_token);
         return AUTH_ERR_UNAUTHORIZED;
     }
 
+    if (redis_rc != REDIS_OK) {
+        DEBUG_PRINT_MAIN("auth_validate_session: redis miss/error, restored session cache from db");
+    }
+    if (redis_set_session(session_token, uid, ttl) != REDIS_OK) {
+        DEBUG_PRINT_MAIN("auth_validate_session: failed to warm redis from db session");
+    }
+
+    free(session_token);
     *user_id = uid;
     return AUTH_OK;
 }
@@ -100,6 +118,10 @@ int auth_login(const char *username, const char *password,
     if (!session_token) {
         ERROR_PRINT("auth_login: db_create_session failed for user_id=%d", uid);
         return AUTH_ERR_SERVER;
+    }
+
+    if (redis_set_session(session_token, uid, ttl) != REDIS_OK) {
+        DEBUG_PRINT_MAIN("auth_login: redis_set_session failed, keeping db session only");
     }
 
     size_t hdr_size = strlen(session_token) + 128;
