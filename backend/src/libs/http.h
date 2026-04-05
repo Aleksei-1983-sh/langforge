@@ -88,6 +88,13 @@ int my_send_response_with_headers(http_connection_t *conn,
                                   const char **headers,
                                   size_t headers_count);
 
+int http_send_raw(http_connection_t *conn, const char *data, size_t len);
+int http_connection_fd(http_connection_t *conn);
+const char *http_connection_request_buffer(http_connection_t *conn);
+void http_connection_keep_open(http_connection_t *conn);
+void http_connection_mark_websocket(http_connection_t *conn);
+void http_connection_mark_sse(http_connection_t *conn);
+
 // Распарсить raw-буфер длины raw_len в структуру http_request_t.
 // Возвращает 0 при успехе, -1 при ошибки.
 // Выделяет req->body через malloc; при неудаче body= NULL.
