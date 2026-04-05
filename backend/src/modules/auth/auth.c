@@ -1,4 +1,4 @@
-#include "modules/auth/auth.h"
+#include "internal_api/auth_api.h"
 
 #include "db/db.h"
 #include "dbug/dbug.h"
@@ -51,13 +51,13 @@ static char *cookie_get_value(const char *cookie_header, const char *name)
     return NULL;
 }
 
-int auth_validate_session(const char *cookie_header, int *user_id)
+int auth_api_validate_session(const char *cookie_header, int *user_id)
 {
-    if (!cookie_header || !user_id) return AUTH_ERR_SERVER;
+    if (!cookie_header || !user_id) return AUTH_API_ERR_SERVER;
 
     char *session_token = cookie_get_value(cookie_header, "session");
     if (!session_token) {
-        return AUTH_ERR_UNAUTHORIZED;
+        return AUTH_API_ERR_UNAUTHORIZED;
     }
 
     int ttl = get_session_ttl_from_env();
@@ -66,39 +66,39 @@ int auth_validate_session(const char *cookie_header, int *user_id)
     if (redis_rc == REDIS_OK && uid > 0) {
         free(session_token);
         *user_id = uid;
-        return AUTH_OK;
+        return AUTH_API_OK;
     }
 
     uid = db_userid_by_session(session_token, ttl);
 
     if (uid < 0) {
         free(session_token);
-        ERROR_PRINT("auth_validate_session: db_userid_by_session failed");
-        return AUTH_ERR_SERVER;
+        ERROR_PRINT("auth_api_validate_session: db_userid_by_session failed");
+        return AUTH_API_ERR_SERVER;
     }
 
     if (uid == 0) {
         free(session_token);
-        return AUTH_ERR_UNAUTHORIZED;
+        return AUTH_API_ERR_UNAUTHORIZED;
     }
 
     if (redis_rc != REDIS_OK) {
-        DEBUG_PRINT_MAIN("auth_validate_session: redis miss/error, restored session cache from db");
+        DEBUG_PRINT_MAIN("auth_api_validate_session: redis miss/error, restored session cache from db");
     }
     if (redis_set_session(session_token, uid, ttl) != REDIS_OK) {
-        DEBUG_PRINT_MAIN("auth_validate_session: failed to warm redis from db session");
+        DEBUG_PRINT_MAIN("auth_api_validate_session: failed to warm redis from db session");
     }
 
     free(session_token);
     *user_id = uid;
-    return AUTH_OK;
+    return AUTH_API_OK;
 }
 
-int auth_login(const char *username, const char *password,
-               int *user_id, char **set_cookie_header)
+int auth_api_login(const char *username, const char *password,
+                   int *user_id, char **set_cookie_header)
 {
     if (!username || !password || !user_id || !set_cookie_header) {
-        return AUTH_ERR_SERVER;
+        return AUTH_API_ERR_SERVER;
     }
 
     *set_cookie_header = NULL;
@@ -106,18 +106,18 @@ int auth_login(const char *username, const char *password,
 
     int uid = db_login_user(username, password);
     if (uid == -1) {
-        return AUTH_ERR_INVALID_CREDENTIALS;
+        return AUTH_API_ERR_INVALID_CREDENTIALS;
     }
     if (uid < 0) {
-        ERROR_PRINT("auth_login: db_login_user failed with code=%d", uid);
-        return AUTH_ERR_SERVER;
+        ERROR_PRINT("auth_api_login: db_login_user failed with code=%d", uid);
+        return AUTH_API_ERR_SERVER;
     }
 
     int ttl = get_session_ttl_from_env();
     char *session_token = db_create_session(uid, ttl);
     if (!session_token) {
-        ERROR_PRINT("auth_login: db_create_session failed for user_id=%d", uid);
-        return AUTH_ERR_SERVER;
+        ERROR_PRINT("auth_api_login: db_create_session failed for user_id=%d", uid);
+        return AUTH_API_ERR_SERVER;
     }
 
     if (redis_set_session(session_token, uid, ttl) != REDIS_OK) {
@@ -128,7 +128,7 @@ int auth_login(const char *username, const char *password,
     char *cookie_header = malloc(hdr_size);
     if (!cookie_header) {
         free(session_token);
-        return AUTH_ERR_SERVER;
+        return AUTH_API_ERR_SERVER;
     }
 
     int written = snprintf(cookie_header, hdr_size,
@@ -138,31 +138,31 @@ int auth_login(const char *username, const char *password,
 
     if (written < 0 || (size_t)written >= hdr_size) {
         free(cookie_header);
-        ERROR_PRINT("auth_login: cookie header truncated");
-        return AUTH_ERR_SERVER;
+        ERROR_PRINT("auth_api_login: cookie header truncated");
+        return AUTH_API_ERR_SERVER;
     }
 
     *user_id = uid;
     *set_cookie_header = cookie_header;
-    return AUTH_OK;
+    return AUTH_API_OK;
 }
 
-int auth_register(const char *username, const char *email,
-                  const char *password, int *user_id)
+int auth_api_register(const char *username, const char *email,
+                      const char *password, int *user_id)
 {
     if (!username || !email || !password || !user_id) {
-        return AUTH_ERR_SERVER;
+        return AUTH_API_ERR_SERVER;
     }
 
     int new_user_id = db_register_user(username, email, password);
     if (new_user_id == -2) {
-        return AUTH_ERR_CONFLICT;
+        return AUTH_API_ERR_CONFLICT;
     }
     if (new_user_id < 0) {
-        ERROR_PRINT("auth_register: db_register_user failed with code=%d", new_user_id);
-        return AUTH_ERR_SERVER;
+        ERROR_PRINT("auth_api_register: db_register_user failed with code=%d", new_user_id);
+        return AUTH_API_ERR_SERVER;
     }
 
     *user_id = new_user_id;
-    return AUTH_OK;
+    return AUTH_API_OK;
 }

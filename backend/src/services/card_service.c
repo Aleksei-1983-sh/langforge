@@ -1,6 +1,6 @@
 #include "services/card_service.h"
 
-#include "db/db.h"
+#include "internal_api/card_api.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -12,7 +12,7 @@ int card_service_list(int user_id, Word **out_words, size_t *out_count)
     *out_words = NULL;
     *out_count = 0;
 
-    if (db_get_all_words(out_words, out_count, user_id) != 0) {
+    if (card_api_list_words(user_id, out_words, out_count) != CARD_API_OK) {
         return CARD_SERVICE_ERR_SERVER;
     }
 
@@ -27,7 +27,7 @@ int card_service_add(const char *word, const char *transcription,
         return CARD_SERVICE_ERR_SERVER;
     }
 
-    if (db_add_word(word, transcription, translation, example, user_id) != 0) {
+    if (card_api_add_word(word, transcription, translation, example, user_id) != CARD_API_OK) {
         return CARD_SERVICE_ERR_SERVER;
     }
 
@@ -36,7 +36,7 @@ int card_service_add(const char *word, const char *transcription,
 
 void card_service_free_words(Word *words, size_t count)
 {
-    db_free_word_list(words, count);
+    card_api_free_words(words, count);
 }
 
 int card_service_create(const card_service_create_input_t *input,
@@ -49,23 +49,24 @@ int card_service_create(const card_service_create_input_t *input,
         return CARD_SERVICE_ERR_INVALID_ARGUMENT;
     }
 
-    if (db_add_word(input->word,
-                    input->transcription,
-                    input->translation,
-                    input->example,
-                    input->user_id) != 0) {
+    card_api_create_input_t create_input;
+    create_input.user_id = input->user_id;
+    create_input.word = input->word;
+    create_input.transcription = input->transcription;
+    create_input.translation = input->translation;
+    create_input.example_1 = input->example;
+    create_input.example_2 = NULL;
+
+    switch (card_api_create(&create_input, out_card_id)) {
+    case CARD_API_OK:
+        return CARD_SERVICE_OK;
+    case CARD_API_ERR_INVALID_ARGUMENT:
+        return CARD_SERVICE_ERR_INVALID_ARGUMENT;
+    case CARD_API_ERR_CONFLICT:
+        return CARD_SERVICE_ERR_CONFLICT;
+    default:
         return CARD_SERVICE_ERR_SERVER;
     }
-
-    if (out_card_id) {
-        /*
-         * Текущий DB contract не возвращает id созданной карточки.
-         * После расширения db.h здесь должен появиться реальный card_id.
-         */
-        *out_card_id = 0;
-    }
-
-    return CARD_SERVICE_OK;
 }
 
 int card_service_get(const card_service_get_query_t *query,
@@ -105,8 +106,18 @@ int card_service_exists(const card_service_exists_query_t *query,
         return CARD_SERVICE_ERR_INVALID_ARGUMENT;
     }
 
-    *out_exists = db_word_exists(query->word, query->user_id) ? 1 : 0;
-    return CARD_SERVICE_OK;
+    card_api_exists_query_t exists_query;
+    exists_query.user_id = query->user_id;
+    exists_query.word = query->word;
+
+    switch (card_api_exists(&exists_query, out_exists)) {
+    case CARD_API_OK:
+        return CARD_SERVICE_OK;
+    case CARD_API_ERR_INVALID_ARGUMENT:
+        return CARD_SERVICE_ERR_INVALID_ARGUMENT;
+    default:
+        return CARD_SERVICE_ERR_SERVER;
+    }
 }
 
 void card_service_free_card(card_service_card_t *card)
