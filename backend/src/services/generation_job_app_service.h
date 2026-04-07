@@ -6,6 +6,7 @@
 void generation_job_app_service_init(void);
 void generation_job_app_service_shutdown(void);
 
+//создает джобу которая запускает пайплай обработку закинутого текста 
 int generation_job_app_service_create(const generation_job_create_input_t *input,
                                       const generation_job_t **out_job);
 int generation_job_app_service_get(int job_id, const generation_job_t **out_job);

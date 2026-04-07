@@ -1,0 +1,127 @@
+
+ Концептуально у вас realtime_hub используется, но не напрямую из main и почти не из бизнес-кода. Он стоит в середине цепочки доставки
+  событий:
+
+  POST /api/v1/generation-jobs
+          |
+          v
+  [generation_job_handler]
+          |
+          v
+  [generation_job_app_service_create]
+          |
+          v
+  [job_pipeline_service_run]
+          |
+          +--> job_event_service_emit_created/progress/draft/job(...)
+                      |
+                      v
+               realtime_emit_event(...)
+                      |
+                      v
+               rt_hub_broadcast(...)
+                      |
+            +---------+---------+
+            |                   |
+            v                   v
+          /ws                 /events
+      websocket                SSE
+
+  То есть rt_hub_* не обязан вызываться везде. Бизнес-логика должна знать только про realtime_emit_event() и job_event_service_*. А сам
+  хаб нужен только в транспортном слое, где есть живые подключения клиентов. Это уже видно в коде:
+  src/modules/realtime/realtime.c:73, src/modules/realtime/realtime_ws.c:323, src/modules/realtime/realtime_hub.c:119.
+
+  Главная проблема у вас сейчас не в том, что хаб “нигде не используется”, а в архитектуре запуска job. POST /api/v1/generation-jobs
+  вызывает generation_job_service_create(), а тот сразу синхронно запускает весь pipeline через job_pipeline_service_run(job) до
+  возврата HTTP-ответа: src/services/generation_job_app_service.c:57, src/services/job_pipeline_service.c:70. Из-за этого типовой
+  сценарий ломается:
+
+  Клиент -> POST /generation-jobs
+  Сервер -> создал job
+  Сервер -> сразу начал выполнять job
+  Сервер -> уже шлет realtime события
+  Клиент -> еще не успел открыть /ws?job_id=...
+
+  Поэтому клиент “не добавляется вовремя” не потому, что rt_hub_add_client() не работает, а потому что подключение открывается слишком
+  поздно относительно синхронной обработки job.
+
+  Как это должно быть концептуально:
+
+  1. Клиент открывает realtime-канал
+     /ws?job_id=123   или   /events?job_id=123
+
+  2. Сервер добавляет fd в rt_hub
+     rt_hub_mark_websocket / rt_hub_mark_sse
+     rt_hub_set_subscription(fd, job_id)
+
+  3. Когда pipeline меняет состояние job:
+     queued -> tokenizing -> filtering -> generating -> review_ready/completed
+
+  4. job_event_service вызывает realtime_emit_event()
+
+  5. rt_hub_broadcast отправляет событие только тем,
+     у кого subscribed_job_id == job_id
+
+  ASCII по ролям:
+
+  [HTTP API]
+    нужен для:
+    - создать job
+    - получить текущее состояние job
+    - approve/reject/regenerate/cancel
+    - начальная загрузка списка draft'ов
+
+  [Realtime]
+    нужен для:
+    - прогресс job
+    - смена статуса job
+    - по одной присылать новые draft/card
+    - уведомить completed/failed/canceled
+    - обновить draft после regenerate/approve
+
+  [Не нужен realtime]
+    - login/register/me
+    - обычные CRUD-запросы
+    - разовая загрузка уже готового состояния
+
+  Пользователь отправил текст
+          |
+          v
+  Сервер создал job
+          |
+          v
+  Сервер начал генерировать карточки по одной
+          |
+          +--> draft #1 готов -> отправить клиенту
+          +--> draft #2 готов -> отправить клиенту
+          +--> draft #3 готов -> отправить клиенту
+          |
+          v
+  Сервер прислал финальный статус
+
+  Еще 2 важных наблюдения по текущей реализации:
+
+  1. Подписка у вас задается только при подключении через query string job_id, а не сообщением после открытия сокета: src/modules/
+     То есть схема сейчас только такая:
+
+  GET /ws?job_id=123
+
+  а не:
+
+  open /ws
+  send {"action":"subscribe","job_id":123}
+
+  2. Если клиент подключится без job_id, он будет получать все события, потому что фильтр в rt_hub_broadcast() пропускает клиентов с
+     subscribed_job_id == 0: src/modules/realtime/realtime_hub.c:137. Для продакшена это обычно слишком широко.
+
+  Если коротко: у вас идея правильная, realtime должен обслуживать именно живой прогресс job и промежуточные карточки. Но чтобы это
+  работало как ожидается, job нужно выполнять асинхронно, а не внутри HTTP POST синхронно. Тогда нормальная схема будет такой:
+
+  POST /generation-jobs  -> быстро вернуть { job_id, status: queued }
+  Параллельно background worker выполняет job
+  Клиент уже сидит на /ws?job_id=...
+  Все изменения приходят по realtime
+  GET /generation-jobs/:id нужен как fallback и для initial sync
+
+  Если хотите, следующим сообщением я могу нарисовать уже “правильную” схему именно под ваш проект: какие 3-4 точки поменять в коде,
+  чтобы realtime начал работать как ожидается.
